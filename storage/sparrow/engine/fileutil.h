@@ -718,13 +718,13 @@ class DataFileHeader : public FileHeaderBase {
 
 private:
 
-	uint32_t genTime_;				// Generation timestamp (seconds since epoch).
-	FileSection recordsSection_;	// Section containing all data records.
-	uint32_t recordSize_;				// Size of a single record.
-	uint64_t records_;				// Number of records.
-	FileSection stringsSection_;	// Section in strings file for fast loading.
-	uint64_t start_;					// Start timestamp (milliseconds since epoch).
-	uint64_t end_;					// End timestamp (milliseconds since epoch).
+	uint32_t genTime_{0};				// Generation timestamp (seconds since epoch).
+	FileSection recordsSection_;		// Section containing all data records.
+	uint32_t recordSize_{0};			// Size of a single record.
+	uint64_t records_{0};				// Number of records.
+	FileSection stringsSection_;		// Section in strings file for fast loading.
+	uint64_t start_{0};					// Start timestamp (milliseconds since epoch).
+	uint64_t end_{0};					// End timestamp (milliseconds since epoch).
 
 	static const uint32_t size_;
 

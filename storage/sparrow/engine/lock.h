@@ -19,7 +19,8 @@
 namespace Sparrow {
 
 #define PFS_MAX_INFO_NAME_LENGTH 128
-#define PFS_MAX_OS_NAME_LENGTH (16 - 3)
+#define PFS_MAX_OS_NAME_LENGTH 16
+
 
 
 // Simple lock.
