@@ -42,7 +42,7 @@ private:
 
 public:
 	
-	SimpleInterval<T>(const T& low, const T& high) : low_(low), high_(high) {
+	SimpleInterval(const T& low, const T& high) : low_(low), high_(high) {
 	}
 
 	T getMin() const override {
@@ -83,9 +83,9 @@ private:
 
 public:
 
-	IntervalTreeNode<T>();
-	IntervalTreeNode<T>(AbstractInterval<T>* interval);
-	~IntervalTreeNode<T>();
+	IntervalTreeNode();
+	IntervalTreeNode(AbstractInterval<T>* interval);
+	~IntervalTreeNode();
 	AbstractInterval<T>* getInterval();
 };
 
@@ -135,8 +135,8 @@ private:
 
 public:
 
-	IntervalTree<T>();
-	~IntervalTree<T>();
+	IntervalTree();
+	~IntervalTree();
 
 	void remove(const AbstractInterval<T>& interval);
 	void insert(AbstractInterval<T>* interval);

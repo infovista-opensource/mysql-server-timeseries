@@ -7,6 +7,11 @@
 
 #include "cond.h"
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -54,5 +59,10 @@ public:
 };
 
 }
+
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
 #endif /* #ifndef _engine_sema_h_ */

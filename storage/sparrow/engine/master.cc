@@ -19,6 +19,11 @@
 #include "../engine/log.h"
 #include "sql/mysqld.h"
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2167,3 +2172,7 @@ DataFileReader::DataFileReader(const TableFields& fields, const ColumnIds& colum
 }
 
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 

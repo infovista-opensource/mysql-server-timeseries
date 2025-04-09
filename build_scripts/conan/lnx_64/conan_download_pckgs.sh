@@ -62,14 +62,14 @@ fi
 export SSLDIR
 echo "Openssl dir $SSLDIR"
 
-BOOSTDIR=`grep -m 1 'boost.*include$'  $generator_folder/conanbuildinfo.txt` 
-BOOSTDIR=${BOOSTDIR%/*} 
-if [ -z "${BOOSTDIR}" ]; then
-	echo `date +"%x %X"` Error: boost library has not been downloaded. Aborting.
-	exit 1
-fi
-export BOOSTDIR
-echo "Boost dir $BOOSTDIR"
+# BOOSTDIR=`grep -m 1 'boost.*include$'  $generator_folder/conanbuildinfo.txt` 
+# BOOSTDIR=${BOOSTDIR%/*} 
+# if [ -z "${BOOSTDIR}" ]; then
+# 	echo `date +"%x %X"` Error: boost library has not been downloaded. Aborting.
+# 	exit 1
+# fi
+# export BOOSTDIR
+# echo "Boost dir $BOOSTDIR"
 
 
 if [ "$PYTHON_VERSION" == "2" ]; then 

@@ -248,7 +248,6 @@ echo `date +"%x %X"` "Running on RedHat version $REDHAT_VERSION"
 GCC_VERSION=`gcc --version | head -n1 | sed -e 's/.*(GCC) \([0-9].[0-9]*\).*/\1/'`
 echo `date +"%x %X"` "gcc version is $GCC_VERSION"
 
-
 # Execute the conan script to get the openssl third party lib
 echo `date +"%x %X"` "Executing conan script"
 cd $SOURCE_ROOT_FOLDER/build_scripts/conan/lnx_64
@@ -260,22 +259,22 @@ if [ -z "$SSLDIR" ]; then
 	exit 1
 fi
 
-if [ -z "$BOOSTDIR" ]; then
-	# Checks the MySQL source code includes the boost library it requires.
-	# If so, set the BOOSTDIR accordingly
-	cd $SOURCE_ROOT_FOLDER
-	if [ ! -d boost ]; then
-		echo `date +"%x %X"` Missing boost library.
-		exit 1
-	fi
+# if [ -z "$BOOSTDIR" ]; then
+# 	# Checks the MySQL source code includes the boost library it requires.
+# 	# If so, set the BOOSTDIR accordingly
+# 	cd $SOURCE_ROOT_FOLDER
+# 	if [ ! -d boost ]; then
+# 		echo `date +"%x %X"` Missing boost library.
+# 		exit 1
+# 	fi
 
-	cd boost
-	BOOSTDIR_VER=`ls`
-	BOOSTDIR=$SOURCE_ROOT_FOLDER/boost/$BOOSTDIR_VER
-else
-	BOOSTDIR=$BOOSTDIR/include
-fi
-echo `date +"%x %X"` Boost dir is $BOOSTDIR
+# 	cd boost
+# 	BOOSTDIR_VER=`ls`
+# 	BOOSTDIR=$SOURCE_ROOT_FOLDER/boost/$BOOSTDIR_VER
+# else
+# 	BOOSTDIR=$BOOSTDIR/include
+# fi
+# echo `date +"%x %X"` Boost dir is $BOOSTDIR
 
 # Prepare the build folder which will contain the CMake resulting files and the compilation files
 #  and prepare the distrib build folder which will the subset of files we package and distribute.
@@ -297,7 +296,7 @@ build_dir_arch=$build_dir/$BUILD_MODE
 
 # Build source code. Try to build and embed only the required modules. So remove from build all module that are not needed.
 echo `date +"%x %X"` "Starting $BUILD_MODE build"
-CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DBUILD_CONFIG=mysql_${BUILD_MODE} -DWITH_SSL=$SSLDIR -DWITH_BOOST=$BOOSTDIR"
+CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DBUILD_CONFIG=mysql_${BUILD_MODE} -DWITH_SSL=$SSLDIR"
 echo "CMAKE_OPTIONS is " $CMAKE_OPTIONS
 
 if [ $BUILD_MODE = "debug"  ]; then

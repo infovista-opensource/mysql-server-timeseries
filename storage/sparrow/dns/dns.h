@@ -10,6 +10,11 @@
 
 extern uint sparrow_idle_thread_timeout;
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -272,5 +277,9 @@ public:
 };
 
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
 #endif /* #ifndef _dns_dns_h_ */

@@ -19,6 +19,12 @@
 #pragma warning(disable:4355)
 #endif
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
+
 namespace Sparrow {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -34,25 +40,20 @@ private:
 	ID id_;
 	V value_;
 
-private:
-
-	CacheEntry<ID, V, H>(const CacheEntry<ID, V, H>& right);
-	CacheEntry<ID, V, H>& operator = (const CacheEntry<ID, V, H>& right);
-
 public:
 
 	// Default constructor.
-	CacheEntry<ID, V, H>()
+	CacheEntry()
 		: references_(0), valid_(false), level_(0) {
 	}
 
 	// Search (key) constructor.
-	CacheEntry<ID, V, H>(const ID& id)
+	CacheEntry(const ID& id)
 		: references_(0), valid_(false), level_(0), id_(id) {
 	}
 
 	// Constructor with level and value.
-	CacheEntry<ID, V, H>(const uint32_t level, const ID& id, const V& value)
+	CacheEntry(const uint32_t level, const ID& id, const V& value)
 		: references_(0), valid_(false), level_(level), id_(id), value_(value) {
 	}
 
@@ -63,6 +64,9 @@ public:
 			return true;
 		}
 	}
+
+	CacheEntry(const CacheEntry<ID, V, H>& right) = delete;
+	CacheEntry<ID, V, H>& operator = (const CacheEntry<ID, V, H>& right) = delete;
 
 	void acquire() {
 		references_++;
@@ -184,7 +188,7 @@ private:
 
 public:
 
-	CacheLevel<ID, V, H>(const uint32_t level, Lock& lock, SYSidlist<CacheEntry<ID, V, H> >& list);
+	CacheLevel(const uint32_t level, Lock& lock, SYSidlist<CacheEntry<ID, V, H> >& list);
 
 	CacheEntry<ID, V, H>* acquire(const bool wait = true);
 
@@ -318,7 +322,7 @@ private:
 
 public:
 
-	Cache<ID, V, N, H>(const char* name, uint32_t* entries, CacheEntry<ID, V, H>** cacheEntries,
+	Cache(const char* name, uint32_t* entries, CacheEntry<ID, V, H>** cacheEntries,
 		volatile uint64_t& acquires, volatile uint64_t& releases, volatile uint64_t& misses, volatile uint64_t& hits, volatile uint64_t& slowHits);
 
 	// Note there is no destructor; a cache is allocated upon startup and never destroyed.
@@ -772,11 +776,11 @@ private:
 
 public:
 
-	CacheGuard<ID, V, N, H>(Cache<ID, V, N, H>& cache, const uint32_t level, const ID& id, const H& hint, const bool clear) _THROW_(SparrowException)
+	CacheGuard(Cache<ID, V, N, H>& cache, const uint32_t level, const ID& id, const H& hint, const bool clear) _THROW_(SparrowException)
 		: cache_(cache), entry_(cache.acquire(level, id, hint, true, true)), clear_(clear) {
 	}
 
-	~CacheGuard<ID, V, N, H>() {
+	~CacheGuard() {
 		cache_.release(entry_, entry_->getLevel(), clear_, true);
 	}
 
@@ -1238,6 +1242,10 @@ public:
 #define IO_STAT_BYTES(B) __ioguard.setBytes(B)
 
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
 #endif /* #ifndef _engine_cache_h_ */
 

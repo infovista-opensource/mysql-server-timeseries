@@ -57,10 +57,10 @@ template<class T> inline void SYSallocator<T>::destroy(T* p) {
 template<class T, class A = SYSallocator<T> > class SYSarray : public A {
 public:
 
-	SYSarray<T, A>(const uint32_t size = 0);
-	SYSarray<T, A>(const uint32_t size, const T& init);
-	SYSarray<T, A>(const SYSarray<T, A>& right);
-	~SYSarray<T, A>();
+	SYSarray(const uint32_t size = 0);
+	SYSarray(const uint32_t size, const T& init);
+	SYSarray(const SYSarray<T, A>& right);
+	~SYSarray();
 
 	// accessors
 	uint32_t length() const;
@@ -204,9 +204,9 @@ template<class T, class A> inline SYSarray<T, A>::SYSarray(const SYSarray<T, A>&
 template<class T, uint32_t G = 0, class A = SYSallocator<T> > class SYSvector: public A {
 public:
 
-	SYSvector<T, G, A>(const uint32_t size = 0);
-	SYSvector<T, G, A>(const SYSvector<T, G, A>& right);
-	~SYSvector<T, G, A>();
+	SYSvector(const uint32_t size = 0);
+	SYSvector(const SYSvector<T, G, A>& right);
+	~SYSvector();
 
 	// accessors
 	uint32_t entries() const;
@@ -528,7 +528,7 @@ template<class T, uint32_t G, class A> inline const T* SYSvector<T, G, A>::data(
 template<class T, uint32_t G, class A = SYSallocator<T*> > class SYSpVector: public SYSvector<T*, G, A> {
 public:
 
-	SYSpVector<T, G, A>(const uint32_t size = 0) : SYSvector<T*, G, A>(size) {
+	SYSpVector(const uint32_t size = 0) : SYSvector<T*, G, A>(size) {
 	}
 
 	// accessors
@@ -605,11 +605,11 @@ template<class T, uint32_t G, class A> inline bool SYSpVector<T, G, A>::operator
 template<class T, uint32_t G = 0, class A = SYSallocator<T> > class SYSsortedVector: public SYSvector<T, G, A> {
 public:
 
-	SYSsortedVector<T, G, A>(const uint32_t size = 0) : SYSvector<T, G, A>(size) {
+	SYSsortedVector(const uint32_t size = 0) : SYSvector<T, G, A>(size) {
 	}
 
 	SYSsortedVector<T, G, A>& operator = (const SYSvector<T, G, A>& right);
-	SYSsortedVector<T, G, A>(const SYSvector<T, G, A>& right);
+	SYSsortedVector(const SYSvector<T, G, A>& right);
 
 	// accessors
 	uint32_t index(const T& t) const;
@@ -776,7 +776,7 @@ template<class T, uint32_t G, class A> inline bool SYSsortedVector<T, G, A>::isS
 template<class T, uint32_t G, class A = SYSallocator<T*> > class SYSpSortedVector: public SYSvector<T*, G, A> {
 public:
 
-	SYSpSortedVector<T, G, A>(const uint32_t size = 0) : SYSvector<T*, G, A>(size) {
+	SYSpSortedVector(const uint32_t size = 0) : SYSvector<T*, G, A>(size) {
 	}
 
 	// accessors
@@ -940,10 +940,10 @@ private:
 
 public:
 
-	SYSlarray<T, G, A>() : length_(0) {
+	SYSlarray() : length_(0) {
 	}
 
-	~SYSlarray<T, G, A>();
+	~SYSlarray();
 
 	const T& operator[](const uint32_t index) const;
 
@@ -1051,11 +1051,11 @@ public:
 
 	static const int BLOCK_SIZE = 2048;
 
-	SYSlvector<T, A>();
+	SYSlvector();
 
-	~SYSlvector<T, A>();
+	~SYSlvector();
 
-	SYSlvector<T, A>(const SYSlvector<T, A>& right);
+	SYSlvector(const SYSlvector<T, A>& right);
 
 	SYSlvector<T, A>& operator =(const SYSlvector<T, A>& right);
 
@@ -1187,9 +1187,9 @@ protected:
 
 public:
 
-	SYSbitVector<A>();
-	SYSbitVector<A>(const SYSbitVector<A>& right);
-	~SYSbitVector<A>();
+	SYSbitVector();
+	SYSbitVector(const SYSbitVector<A>& right);
+	~SYSbitVector();
 
 	// accessors
 	bool isEmpty() const;
@@ -1326,13 +1326,13 @@ public:
 
 	static const uint32_t BLOCK_SIZE = 2048;
 
-	SYSxvector<T, A>();
+	SYSxvector();
 
-	~SYSxvector<T, A>();
+	~SYSxvector();
 
-	SYSxvector<T, A>(const SYSxvector<T, A>& right);
+	SYSxvector(const SYSxvector<T, A>& right);
 
-	SYSxvector<T, A>(const uint32_t length);
+	SYSxvector(const uint32_t length);
 
 	SYSxvector<T, A>& operator =(const SYSxvector<T, A>& right);
 

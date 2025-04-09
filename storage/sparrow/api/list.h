@@ -17,7 +17,7 @@ namespace Sparrow {
 template<class T> class SYSslink {
 public:
 
-	SYSslink<T>(const T& object, SYSslink<T>* next);
+	SYSslink(const T& object, SYSslink<T>* next);
 	SYSslink<T>* getNext() const;
 	void setNext(SYSslink<T>* next);
 	const T& getObject() const;
@@ -59,7 +59,7 @@ template<class T> inline void SYSslink<T>::setObject(const T& object) {
 template<class T> class SYSslAllocator {
 public:
 
-	SYSslAllocator<T>() {
+	SYSslAllocator() {
 	}
 	SYSslink<T>* acquire(const T& object, SYSslink<T>* next) {
 		return new SYSslink<T>(object, next);
@@ -79,10 +79,10 @@ private:
 
 public:
 
-	SYSslPoolAllocator<T>() :
+	SYSslPoolAllocator() :
 		root_(0) {
 	}
-	~SYSslPoolAllocator<T>() {
+	~SYSslPoolAllocator() {
 		SYSslink<T>* link = root_;
 		while (link != 0) {
 			SYSslink<T>* next = link->getNext();
@@ -119,11 +119,11 @@ template<class T, class A = SYSslAllocator<T> > class SYSslist: public A {
 public:
 
 	// constructors
-	SYSslist<T, A>();
-	SYSslist<T, A>(const SYSslist<T, A>& right);
+	SYSslist();
+	SYSslist(const SYSslist<T, A>& right);
 
 	// destructor
-	~SYSslist<T, A>();
+	~SYSslist();
 
 	// accessors
 	uint32_t entries() const;
@@ -419,7 +419,12 @@ template<class T, class A = SYSslAllocator<T> > class SYSslistIterator : public 
 public:
 
 	// constructor
-	SYSslistIterator<T, A>(SYSslist<T, A>& list);
+	SYSslistIterator(SYSslist<T, A>& list);
+
+	// copy, assignment and equality are forbidden
+	SYSslistIterator(const SYSslistIterator<T, A>& right) = delete;
+	SYSslistIterator<T, A>& operator =(const SYSslistIterator<T, A>& right) = delete;
+	bool operator ==(const SYSslistIterator<T, A>& right) const = delete;
 
 	// operators
 	bool operator ++();
@@ -430,13 +435,6 @@ public:
 	const T& key() const;
 	T& key();
 	bool remove();
-
-private:
-
-	// copy, assignment and equality are forbidden
-	SYSslistIterator<T, A>(const SYSslistIterator<T, A>& right);
-	SYSslistIterator<T, A>& operator =(const SYSslistIterator<T, A>& right);
-	bool operator ==(const SYSslistIterator<T, A>& right) const;
 
 protected:
 
@@ -526,7 +524,7 @@ template<class T, class A = SYSslAllocator<T*> > class SYSpSlist: public SYSslis
 public:
 
 	// constructors
-	SYSpSlist<T, A>();
+	SYSpSlist();
 
 	// accessors
 	T* first() const;
@@ -641,7 +639,12 @@ template<class T, class A = SYSslAllocator<T*> > class SYSpSlistIterator {
 public:
 
 	// constructor
-	SYSpSlistIterator<T, A>(SYSpSlist<T, A>& list);
+	SYSpSlistIterator(SYSpSlist<T, A>& list);
+
+	// copy, assignment and equality are forbidden
+	SYSpSlistIterator(const SYSpSlistIterator<T, A>& right) = delete;
+	SYSpSlistIterator<T, A>& operator =(const SYSpSlistIterator<T, A>& right) = delete;
+	bool operator ==(const SYSpSlistIterator<T, A>& right) const = delete;
 
 	// operators
 	bool operator ++();
@@ -652,13 +655,6 @@ public:
 	const T* key() const;
 	T* key();
 	bool remove();
-
-private:
-
-	// copy, assignment and equality are forbidden
-	SYSpSlistIterator<T, A>(const SYSpSlistIterator<T, A>& right);
-	SYSpSlistIterator<T, A>& operator =(const SYSpSlistIterator<T, A>& right);
-	bool operator ==(const SYSpSlistIterator<T, A>& right) const;
 
 protected:
 
@@ -752,10 +748,15 @@ template<class T> class SYSidlist {
 public:
 
 	// constructor
-	SYSidlist<T>();
+	SYSidlist();
 
 	// destructor
-	~SYSidlist<T>();
+	~SYSidlist();
+
+	// copy, assignment and equality are forbidden
+	SYSidlist(const SYSidlist<T>& right) = delete;
+	SYSidlist<T>& operator =(const SYSidlist<T>& right) = delete;
+	bool operator ==(const SYSidlist<T>& right) const = delete;
 
 	// accessors
 	uint32_t entries() const;
@@ -815,13 +816,6 @@ protected:
 	// internal link/unlink operations
 	void unlink(T* t);
 	void link(T* t, T* right);
-
-private:
-
-	// copy, assignment and equality are forbidden
-	SYSidlist<T>(const SYSidlist<T>& right);
-	SYSidlist<T>& operator =(const SYSidlist<T>& right);
-	bool operator ==(const SYSidlist<T>& right) const;
 
 protected:
 
@@ -941,7 +935,12 @@ template<class T> class SYSidlistIterator {
 public:
 
 	// constructor
-	SYSidlistIterator<T>(SYSidlist<T>& list);
+	SYSidlistIterator(SYSidlist<T>& list);
+
+	// copy, assignment and equality are forbidden
+	SYSidlistIterator(const SYSidlistIterator<T>& right) = delete;
+	SYSidlistIterator<T>& operator =(const SYSidlistIterator<T>& right) = delete;
+	bool operator ==(const SYSidlistIterator<T>& right) const = delete;
 
 	// operators
 	T* operator ++();
@@ -952,13 +951,6 @@ public:
 	void reset();
 	T* key() const;
 	void insert(T* t);
-
-private:
-
-	// copy, assignment and equality are forbidden
-	SYSidlistIterator<T>(const SYSidlistIterator<T>& right);
-	SYSidlistIterator<T>& operator =(const SYSidlistIterator<T>& right);
-	bool operator ==(const SYSidlistIterator<T>& right) const;
 
 protected:
 

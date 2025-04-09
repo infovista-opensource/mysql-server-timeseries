@@ -12,6 +12,11 @@
 
 #include "../engine/log.h"
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -723,15 +728,15 @@ private:
 
 	void refreshEmptyColumns();
 
-	// Copy and assignment are forbidden.
-	TransientPartition(const TransientPartition& right);
-	TransientPartition& operator = (const TransientPartition& right);
-
 public:
 
 	TransientPartition(Master* master, const uint64_t serial);
 
 	~TransientPartition();
+
+	// Copy and assignment are forbidden.
+	TransientPartition(const TransientPartition& right) = delete;
+	TransientPartition& operator = (const TransientPartition& right) = delete;
 
 	Master* getMaster() {
 		return master_.get();
@@ -1146,5 +1151,10 @@ public:
 };
 
 }
+
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
 #endif /* #ifndef _engine_transient_h_ */

@@ -9,6 +9,11 @@
 #include "mysql/psi/mysql_cond.h"
 #include "my_systime.h"
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
 
 class Cond {
@@ -147,5 +152,9 @@ public:
 };
 
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
 #endif /* #ifndef _spw_api_cond_h_ */

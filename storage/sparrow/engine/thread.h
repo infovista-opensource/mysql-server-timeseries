@@ -20,6 +20,11 @@ extern uint sparrow_idle_thread_timeout;
 
 class THD;
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
     
 //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -551,5 +556,10 @@ public:
 };
 
 }
+
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
 #endif /* #ifndef _engine_thread_h_ */

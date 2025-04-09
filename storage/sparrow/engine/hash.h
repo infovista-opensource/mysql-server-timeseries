@@ -21,7 +21,7 @@ static inline uint32_t spreadHashCode(uint32_t h) {
 template<class T> class SYShlink {
 public:
 
-	SYShlink<T>(const T& object, const uint32_t hash, SYShlink<T>* next);
+	SYShlink(const T& object, const uint32_t hash, SYShlink<T>* next);
 	SYShlink<T>* getNext() const;
 	void setNext(SYShlink<T>* next);
 	const T& getObject() const;
@@ -79,7 +79,7 @@ private:
 
 public:
 
-	SYShAllocator<T>() : n_(0) {
+	SYShAllocator() : n_(0) {
 	}
 
 	SYShlink<T>* acquire(const T& object, const uint32_t hash, SYShlink<T>* next) {
@@ -103,10 +103,10 @@ private:
 
 public:
 
-	SYShPoolAllocator<T>() :
+	SYShPoolAllocator() :
 		root_(0) {
 	}
-	~SYShPoolAllocator<T>() {
+	~SYShPoolAllocator() {
 		SYShlink<T>* link = root_;
 		while (link != 0) {
 			SYShlink<T>* next = link->getNext();
@@ -147,7 +147,7 @@ protected:
 
 public:
 
-	SYShashBase<T>(const uint32_t initial);
+	SYShashBase(const uint32_t initial);
 
 	// accessors
 	uint32_t entries() const;
@@ -217,11 +217,11 @@ template<class T, class A = SYShAllocator<T> > class SYShash: public SYShashBase
 public:
 
 	// constructors
-	SYShash<T, A>(const uint32_t initial);
-	SYShash<T, A>(const SYShash<T, A>& right);
+	SYShash(const uint32_t initial);
+	SYShash(const SYShash<T, A>& right);
 
 	// destructor
-	~SYShash<T, A>();
+	~SYShash();
 
 	// operations
 	void insert(const T& t);
@@ -379,8 +379,13 @@ template<class T, class A = SYShAllocator<T> > class SYShashIterator {
 public:
 
 	// constructors
-	SYShashIterator<T, A>(SYShash<T, A>& hash);
-	SYShashIterator<T, A>(const SYShash<T, A>& hash);
+	SYShashIterator(SYShash<T, A>& hash);
+	SYShashIterator(const SYShash<T, A>& hash);
+
+	// copy, assignment and equality are forbidden
+	SYShashIterator(const SYShashIterator<T, A>& right) = delete;
+	SYShashIterator<T, A>& operator =(const SYShashIterator<T, A>& right) = delete;
+	bool operator ==(const SYShashIterator<T, A>& right) const = delete;
 
 	// operators
 	bool operator ++();
@@ -390,13 +395,6 @@ public:
 	void reset();
 	const T& key() const;
 	T& key();
-
-private:
-
-	// copy, assignment and equality are forbidden
-	SYShashIterator<T, A>(const SYShashIterator<T, A>& right);
-	SYShashIterator<T, A>& operator =(const SYShashIterator<T, A>& right);
-	bool operator ==(const SYShashIterator<T, A>& right) const;
 
 protected:
 
@@ -472,11 +470,11 @@ template<class T, class A = SYShAllocator<T*> > class SYSpHash: public SYShashBa
 public:
 
 	// constructors
-	SYSpHash<T, A>(const uint32_t initial);
-	SYSpHash<T, A>(const SYSpHash<T, A>& right);
+	SYSpHash(const uint32_t initial);
+	SYSpHash(const SYSpHash<T, A>& right);
 
 	// destructor
-	~SYSpHash<T, A>();
+	~SYSpHash();
 
 	// operations
 	void insert(T* t);
@@ -624,8 +622,13 @@ template<class T, class A = SYShAllocator<T*> > class SYSpHashIterator {
 public:
 
 	// constructor
-	SYSpHashIterator<T, A>(SYSpHash<T, A>& hash);
-	SYSpHashIterator<T, A>(const SYSpHash<T, A>& hash);
+	SYSpHashIterator(SYSpHash<T, A>& hash);
+	SYSpHashIterator(const SYSpHash<T, A>& hash);
+
+	// copy, assignment and equality are forbidden
+	SYSpHashIterator(const SYSpHashIterator<T, A>& right) = delete;
+	SYSpHashIterator<T, A>& operator =(const SYSpHashIterator<T, A>& right) = delete;
+	bool operator ==(const SYSpHashIterator<T, A>& right) const = delete;
 
 	// operators
 	T* operator ++();
@@ -635,13 +638,6 @@ public:
 	void reset();
 	const T* key() const;
 	T* key();
-
-private:
-
-	// copy, assignment and equality are forbidden
-	SYSpHashIterator<T, A>(const SYSpHashIterator<T, A>& right);
-	SYSpHashIterator<T, A>& operator =(const SYSpHashIterator<T, A>& right);
-	bool operator ==(const SYSpHashIterator<T, A>& right) const;
 
 protected:
 
@@ -716,10 +712,10 @@ private:
 
 public:
 
-	Entry<K, V>();
-	Entry<K, V>(const K& key);
-	Entry<K, V>(const K& key, const V& value);
-	~Entry<K, V>();
+	Entry();
+	Entry(const K& key);
+	Entry(const K& key, const V& value);
+	~Entry();
 	bool operator ==(const Entry<K, V>& right) const;
 	Entry<K, V>& operator =(const Entry<K, V>& right);
 	uint32_t hash() const;

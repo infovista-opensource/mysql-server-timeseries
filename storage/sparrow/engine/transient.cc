@@ -16,6 +16,11 @@
 
 #include "../engine/log.h"
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+#endif 
+
 namespace Sparrow {
 
 using namespace IvFunctions;
@@ -1797,4 +1802,8 @@ void RecordWriter::write(ByteBuffer& buffer, const uint32_t row) _THROW_(Sparrow
 }
 
 }
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif 
 
