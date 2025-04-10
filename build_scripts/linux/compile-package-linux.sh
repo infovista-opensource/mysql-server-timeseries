@@ -252,12 +252,15 @@ echo `date +"%x %X"` "gcc version is $GCC_VERSION"
 echo `date +"%x %X"` "Executing conan script"
 cd $SOURCE_ROOT_FOLDER/build_scripts/conan/lnx_64
 
-. ./conan_download_pckgs.sh
+# No more packages are required from Conan: 
+#	Boost is included in the MySQL source code,
+#	openssl dev package is installed in the docker builder image.
+# . ./conan_download_pckgs.sh
 
-if [ -z "$SSLDIR" ]; then
-	echo `date +"%x %X"` Missing SSLDIR
-	exit 1
-fi
+# if [ -z "$SSLDIR" ]; then
+# 	echo `date +"%x %X"` Missing SSLDIR
+# 	exit 1
+# fi
 
 # if [ -z "$BOOSTDIR" ]; then
 # 	# Checks the MySQL source code includes the boost library it requires.
@@ -296,7 +299,7 @@ build_dir_arch=$build_dir/$BUILD_MODE
 
 # Build source code. Try to build and embed only the required modules. So remove from build all module that are not needed.
 echo `date +"%x %X"` "Starting $BUILD_MODE build"
-CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DBUILD_CONFIG=mysql_${BUILD_MODE} -DWITH_SSL=$SSLDIR"
+CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DBUILD_CONFIG=mysql_${BUILD_MODE} -DWITH_SSL=system"
 echo "CMAKE_OPTIONS is " $CMAKE_OPTIONS
 
 if [ $BUILD_MODE = "debug"  ]; then
