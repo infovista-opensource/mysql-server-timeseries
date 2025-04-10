@@ -38,8 +38,6 @@ jobs:
           echo "Build mode is ${{ env.MODE }}"
           env | sort
           ls -l
-          echo "Conan package folder contains: `ls -l /data/conan`"
-          conan search
           chmod a+x build_scripts/linux/build-linux-github.sh
           build_scripts/linux/build-linux-github.sh  ${{ env.MODE }}
       
