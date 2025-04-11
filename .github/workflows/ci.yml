@@ -16,7 +16,7 @@ jobs:
     needs: []
     runs-on: ubuntu-latest
     container: 
-      image: ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx8:0.48-454903
+      image: ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx8:0.48-454903-b
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
     needs: []
     runs-on: ubuntu-latest
     container: 
-      image: ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx9:0.48-454903
+      image: ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx9:0.48-454903-b
 
     steps:
       - uses: actions/checkout@v4
