@@ -65,6 +65,7 @@ generate_distrib_pack() {
 
 	echo `date +"%x %X"` "Gathering files for libmysqlclient API." 
 	cp -a lib/libmysqlclient.so*  $distrib_folder/lib
+	cp -a /lib64/libssl.so*  /lib64/libcrypto.so*  $distrib_folder/lib
 
 	echo `date +"%x %X"` "Gathering files for Sparrow UDF plugin." 
 	mkdir -p $distrib_folder/lib/plugin
@@ -100,6 +101,7 @@ generate_mysqlapi_pack() {
 	mkdir lib include
 	cp -r ../../include/*  include
 	cp -a ../../lib/libmysqlclient.so*  ../../lib/libmysqlclient.a  lib
+	cp -a /lib64/libssl.so*  /lib64/libcrypto.so*  $distrib_folder/lib
 
 	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$4." 
 	tar -czvf  $3/$4.tar.gz  *
