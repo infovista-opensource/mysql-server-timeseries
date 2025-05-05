@@ -1,0 +1,86 @@
+name: sparrow-ci-workflow
+on:
+  # Triggers the pipeline on push, on PRs to "main", manually
+  push:
+    tags:
+        - '[0-9]+.[0-9]+.[0-9]+**'
+        - '![0-9]+.[0-9]+.[0-9]+-DBG**'
+  workflow_dispatch:
+
+env:
+  DEBUG: ${{ contains(github.ref_name, 'DBG') }}
+  MODE: ${{ contains(github.ref_name, 'DBG') && 'debug' || 'release' }}
+    
+jobs:
+  build-job-lnx8-x64:
+    needs: []
+    runs-on: ubuntu-latest
+    container: 
+      image: ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx8:0.48-454903-b
+
+    steps:
+      - uses: actions/checkout@v4
+          
+      - name: Building binaries
+        shell: bash
+        env:
+          CI_COMMIT_TAG: ${{ github.ref_name }}
+        run: |
+          echo "Working folder `pwd`"
+          echo "Build mode is ${{ env.MODE }}"
+          env | sort
+          ls -l
+          chmod a+x build_scripts/linux/build-linux-github.sh
+          build_scripts/linux/build-linux-github.sh  ${{ env.MODE }}
+      
+      - name: Uploading binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: lnx8-x64-binaries
+          path: |
+            _distrib/lnx8_64/*.tar.gz
+            **/*.log
+      
+      - name: Uploading release assets
+        uses: alexellis/upload-assets@0.4.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["_distrib/lnx8_64/*.tar.gz"]'
+
+  build-job-lnx9-x64:
+    needs: []
+    runs-on: ubuntu-latest
+    container: 
+      image: ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx9:0.48-454903-b
+
+    steps:
+      - uses: actions/checkout@v4
+          
+      - name: Building binaries
+        shell: bash
+        env:
+          CI_COMMIT_TAG: ${{ github.ref_name }}
+        run: |
+          echo "Working folder `pwd`"
+          echo "Build mode is ${{ env.MODE }}"
+          env | sort
+          ls -l
+          chmod a+x build_scripts/linux/build-linux-github.sh
+          build_scripts/linux/build-linux-github.sh  ${{ env.MODE }}
+      
+      - name: Uploading binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: lnx9-x64-binaries
+          path: |
+            _distrib/lnx9_64/*.tar.gz
+            **/*.log
+      
+      - name: Uploading release assets
+        uses: alexellis/upload-assets@0.4.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["_distrib/lnx9_64/*.tar.gz"]'                  
+

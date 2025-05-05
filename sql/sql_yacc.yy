@@ -1455,6 +1455,11 @@ void warn_on_deprecated_user_defined_collation(
 %token<lexer.keyword> BERNOULLI_SYM              1213  /* SQL-2016-N */
 %token<lexer.keyword> TABLESAMPLE_SYM            1214  /* SQL-2016-R */
 
+%token<lexer.keyword> TADJUST_SYM                1215   /* Infovista */
+%token<lexer.keyword> TADJUSTW_SYM               1216   /* Infovista */
+%token<lexer.keyword> TNEXT_SYM                  1217   /* Infovista */
+
+
 /*
   NOTE! When adding new non-standard keywords, make sure they are added to the
   list ident_keywords_unambiguous lest they become reserved keywords.
@@ -11054,6 +11059,30 @@ sum_expr:
           {
             $$= NEW_PTN Item_sum_std(@$, $3, 0, $5);
           }
+        | TADJUST_SYM '(' expr ',' INTERVAL_SYM expr interval ')'
+          {
+            $$= new (YYTHD->mem_root) Item_func_tadjust(@$, $3,$6,$7,1,-1);
+          	if ($$ == NULL)
+              MYSQL_YYABORT;
+          }
+        | TNEXT_SYM '(' expr ',' INTERVAL_SYM expr interval ')'
+          {
+            $$= new (YYTHD->mem_root) Item_func_tnext(@$, $3,$6,$7);
+            if ($$ == NULL)
+              MYSQL_YYABORT;
+          }
+        | TADJUSTW_SYM '(' expr ')'
+          {
+            $$= new (YYTHD->mem_root) Item_func_tadjust(@$, $3,INTERVAL_WEEK,-1,-1);
+          	if ($$ == NULL)
+              MYSQL_YYABORT;
+          }
+        | TADJUSTW_SYM '(' expr ',' expr ')'
+          {
+            $$= new (YYTHD->mem_root) Item_func_tadjust(@$, $3,$5,INTERVAL_WEEK,-1,1);
+            if ($$ == NULL)
+              MYSQL_YYABORT;
+          }
         | VARIANCE_SYM '(' in_sum_expr ')' opt_windowing_clause
           {
             $$= NEW_PTN Item_sum_variance(@$, $3, 0, $5);
@@ -15675,6 +15704,8 @@ ident_keywords_unambiguous:
         | TABLESPACE_SYM
         | TABLE_CHECKSUM_SYM
         | TABLE_NAME_SYM
+        | TADJUST_SYM
+        | TADJUSTW_SYM
         | TEMPORARY
         | TEMPTABLE_SYM
         | TEXT_SYM
@@ -15686,6 +15717,7 @@ ident_keywords_unambiguous:
         | TIMESTAMP_SYM %prec KEYWORD_USED_AS_IDENT
         | TIME_SYM %prec KEYWORD_USED_AS_IDENT
         | TLS_SYM
+        | TNEXT_SYM
         | TRANSACTION_SYM
         | TRIGGERS_SYM
         | TYPES_SYM

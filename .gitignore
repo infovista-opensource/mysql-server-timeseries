@@ -29,3 +29,8 @@ scalability_jobs_*
 .project
 .settings/
 
+*.bak
+
+_build/
+_distrib/
+**generatorfiles*
