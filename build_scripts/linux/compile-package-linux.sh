@@ -101,6 +101,11 @@ generate_mysqlapi_pack() {
 	mkdir lib include
 	cp -r ../../include/*  include
 	cp -a ../../lib/libmysqlclient.so*  ../../lib/libmysqlclient.a  lib
+
+	# We have to include the libssl and libcrypto libraries in the package because the Poller runtime will run on OL9 
+	# but will use the MySQL 8.4 distrbution package built on OL8 (to be compatible with the platform the Poller runtime is built on).
+	# And on OL9, the openssl libraries 1.1 are not available. And, since MySQL 8.4, it is not possible to link mysql binaries statically
+	# with the libssl and libcrypto libraries.
 	cp -a /lib64/libssl.so*  /lib64/libcrypto.so*  $distrib_folder/lib
 
 	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$4." 

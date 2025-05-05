@@ -1,20 +1,13 @@
-Copyright (c) 2000, 2025, Oracle and/or its affiliates.
+The MySQL Timeseries Server is a fork of the offcial Oracle MySQL repository, in which a specific storage engine has been added. This SE, called Sparrow, is focused on optimizing inserting and retrieval of timestamped data. To benefit from the performance optimization, data must be inserted in chronological order. 
 
-This is a release of MySQL, an SQL database server.
+The Sparrow SE has been added into branch 8.0 and 8.4. Insertion into trunbk is currenlty not planned. 
+Integration development for branch 8.0 was done in sub-branch AB#340942-Use-Sparrow-timeseries-storage-engine-with-MySQL-8.0.
+Integration development for branch 8.4 was done in sub-branch 454903-Add-Sparrow-storage-engine-to-MySQL-8.4.
 
-License information can be found in the LICENSE file.
+The official release for MySQL Timeseries Server 8.0 is tag 4.4.3. 
+The official release for MySQL Timeseries Server 8.4 is tag 4.4.4. 
 
-In test packages where this file is renamed README-test, the license
-file is renamed LICENSE-test.
-
-This distribution may include materials developed by third parties.
-For license and attribution notices for these materials,
-please refer to the LICENSE file.
-
-For further information on MySQL or additional documentation, visit
-  http://dev.mysql.com/doc/
-
-For additional downloads and the source of MySQL, visit
-  http://dev.mysql.com/downloads/
-
-MySQL is brought to you by the MySQL team at Oracle.
+5/5/2025
+--------
+Branch AB#340942-Use-Sparrow-timeseries-storage-engine-with-MySQL-8.0 was merged in branch 8.0.
+Branch 454903-Add-Sparrow-storage-engine-to-MySQL-8.4 was merged into branch 8.4. 
