@@ -31,3 +31,9 @@ scalability_jobs_*
 .cproject
 .project
 .settings/
+
+*.bak
+
+_build/
+_distrib/
+**generatorfiles*
