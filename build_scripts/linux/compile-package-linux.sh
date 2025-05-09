@@ -118,7 +118,7 @@ generate_mysqlapi_pack() {
 
 	generate_version_file $2 .
 
-	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	mysqld_version=`$2/bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
 	package_name=mysqlapi-$mysqld_version-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}.tar.gz
 
 	echo `date +"%x %X"` "Packaging mysql api into the compressed file $3/$package_name." 
@@ -155,7 +155,7 @@ generate_sparrowapi_pack() {
 
 	generate_version_file $2 .
 
-	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	mysqld_version=`$2/bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
 	package_name=sparrowapi-$mysqld_version-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}.tar.gz
 
 	echo `date +"%x %X"` "Packaging sparrow api into the compressed file $3/$package_name." 
