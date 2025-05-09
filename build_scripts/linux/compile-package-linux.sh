@@ -56,11 +56,6 @@ generate_version_file()
 	$package_folder/bin/mysqld --version | awk -F'mysqld' '{print $2}' >> $distrib_folder/version.txt
 }
 
-generate_distrib_pack  
-	$build_dir_arch  
-	$build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  
-	$distrib_dir
-
 # Make a package containing everything: the mysql server files and tools, the libmysqlclient API and the sparrow API.
 # This generic package will then be used to create the docker images of the dbsrv and poller runtime. 
 generate_distrib_pack() {
