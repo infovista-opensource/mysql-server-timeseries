@@ -45,15 +45,27 @@ SOURCE_ROOT_FOLDER=`pwd`
 echo `date +"%x %X"` "Source root folder is $SOURCE_ROOT_FOLDER"
 
 
+generate_version_file()
+{
+	package_folder=$1
+	distrib_folder=$2
+
+	echo `date +"%x %X"` "Generating version file in $distrib_folder."
+	
+	echo -n "MySQL Timeseries server" > $distrib_folder/version.txt
+	$package_folder/bin/mysqld --version | awk -F'mysqld' '{print $2}' >> $distrib_folder/version.txt
+}
+
+generate_distrib_pack  
+	$build_dir_arch  
+	$build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  
+	$distrib_dir
+
 # Make a package containing everything: the mysql server files and tools, the libmysqlclient API and the sparrow API.
 # This generic package will then be used to create the docker images of the dbsrv and poller runtime. 
-
 generate_distrib_pack() {
 
 	echo `date +"%x %X"` "Packaging all binaries and dependencies into a single package $4." 
-
-	# First delete any previous zip file left behind in the _distrib folder
-	rm -f $3/$4 > /dev/null 2>&1
 
 	pushd $2
 	rm -rf _distrib_tmp > /dev/null 2>&1
@@ -71,9 +83,18 @@ generate_distrib_pack() {
 	mkdir -p $distrib_folder/lib/plugin
 	cp  $1/storage/sparrow/udf/libsparrowudf.so  $distrib_folder/lib/plugin
 
-	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$4." 
+	generate_version_file $2 distrib_folder
+
+	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	package_name=mysql-ts-srv-$mysqld_version-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}.tar.gz
+
+	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$package_name." 
 	cd $distrib_folder
-	tar -czvf  $3/$4.tar.gz  *
+
+	# First delete any previous zip file left behind in the _distrib folder
+	rm -f $3/$package_name > /dev/null 2>&1
+
+	tar -czvf  $3/$package_name  *
 	res=$?
 	if [ $? -ne 0 ]; then
 		echo `date +"%x %X"` "Tar gzip all files into a package failed." 
@@ -86,9 +107,6 @@ generate_distrib_pack() {
 generate_mysqlapi_pack() {
 
 	echo `date +"%x %X"` "Packaging MySQL API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package $4." 
-
-	# First delete any previous zip file left behind in the _distrib folder
-	rm -f $3/$4 > /dev/null 2>&1
 
 	pushd $2
 
@@ -103,8 +121,17 @@ generate_mysqlapi_pack() {
 	cp -a ../../lib/libmysqlclient.so*  ../../lib/libmysqlclient.a  lib
 	cp -a /lib64/libssl.so*  /lib64/libcrypto.so*  $distrib_folder/lib
 
-	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$4." 
-	tar -czvf  $3/$4.tar.gz  *
+	generate_version_file $2 .
+
+	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	package_name=mysqlapi-$mysqld_version-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}.tar.gz
+
+	echo `date +"%x %X"` "Packaging mysql api into the compressed file $3/$package_name." 
+
+	# First delete any previous zip file left behind in the _distrib folder
+	rm -f $3/$package_name > /dev/null 2>&1
+
+	tar -czvf  $3/$package_name  *
 	res=$?
 	if [ $? -ne 0 ]; then
 		echo `date +"%x %X"` "Tar gzip all files into a package failed." 
@@ -119,9 +146,6 @@ generate_sparrowapi_pack() {
 
 	echo `date +"%x %X"` "Packaging Sparrow API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package $4." 
 
-	# First delete any previous zip file left behind in the _distrib folder
-	rm -f $3/$4 > /dev/null 2>&1
-
 	pushd $2
 
 	echo `date +"%x %X"` "Gathering all required files for the MySQL client API." 
@@ -134,8 +158,17 @@ generate_sparrowapi_pack() {
 	cp  -r $SOURCE_ROOT_FOLDER/storage/sparrow/api/include/* include
 	cp  -a ../../lib/libsparrowapi.so*  lib
 
-	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$4." 
-	tar -czvf  $3/$4.tar.gz  *
+	generate_version_file $2 .
+
+	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	package_name=sparrowapi-$mysqld_version-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}.tar.gz
+
+	echo `date +"%x %X"` "Packaging sparrow api into the compressed file $3/$package_name." 
+
+	# First delete any previous zip file left behind in the _distrib folder
+	rm -f $3/$package_name > /dev/null 2>&1
+
+	tar -czvf  $3/$package_name  *
 	res=$?
 	if [ $? -ne 0 ]; then
 		echo `date +"%x %X"` "Tar gzip all files into a package failed." 
@@ -148,97 +181,97 @@ generate_sparrowapi_pack() {
 
 
 # Packages the libmysqlclient API into a conan package and uploads it to the conan repository on jfrog.
-generate_mysqlapi_conan_pack() {
-	pushd $1
+# generate_mysqlapi_conan_pack() {
+# 	pushd $1
 
-	echo `date +"%x %X"` "Packaging the MySQL libmysqlclient API into a conan package, version $SPARROW_BUILD_NUM, $BUILD_MODE." 
-	rm  -Rf  _conan/mysqlapi
-	mkdir -p  _conan/mysqlapi
-	cd _conan/mysqlapi
+# 	echo `date +"%x %X"` "Packaging the MySQL libmysqlclient API into a conan package, version $SPARROW_BUILD_NUM, $BUILD_MODE." 
+# 	rm  -Rf  _conan/mysqlapi
+# 	mkdir -p  _conan/mysqlapi
+# 	cd _conan/mysqlapi
 
-	cp  $SOURCE_ROOT_FOLDER/conan/lnx_64/profile.txt  profile.txt
-	cp  $SOURCE_ROOT_FOLDER/conan/conanfile.mysqlapi.py  conanfile.py
-	sed -E "s/version[ \t]*=[ \t]*\".*\"/version = \"$SPARROW_BUILD_NUM\"/" conanfile.py > conanfile.new.py
-	mv -f conanfile.new.py conanfile.py
-	rm -f conanfile.new.py
+# 	cp  $SOURCE_ROOT_FOLDER/conan/lnx_64/profile.txt  profile.txt
+# 	cp  $SOURCE_ROOT_FOLDER/conan/conanfile.mysqlapi.py  conanfile.py
+# 	sed -E "s/version[ \t]*=[ \t]*\".*\"/version = \"$SPARROW_BUILD_NUM\"/" conanfile.py > conanfile.new.py
+# 	mv -f conanfile.new.py conanfile.py
+# 	rm -f conanfile.new.py
 
-	if [ $BUILD_MODE = "debug"  ]; then
-		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Debug/" profile.txt > profile.new.txt
-	else
-		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Release/" profile.txt > profile.new.txt
-	fi
-	mv -f profile.new.txt  profile.txt
-	rm -f profile.new.txt
+# 	if [ $BUILD_MODE = "debug"  ]; then
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Debug/" profile.txt > profile.new.txt
+# 	else
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Release/" profile.txt > profile.new.txt
+# 	fi
+# 	mv -f profile.new.txt  profile.txt
+# 	rm -f profile.new.txt
 
-	mkdir lib include
-	cp -r ../../include/*  include
-	cp ../../lib/libmysqlclient.so  ../../lib/libmysqlclient.a  lib
+# 	mkdir lib include
+# 	cp -r ../../include/*  include
+# 	cp ../../lib/libmysqlclient.so  ../../lib/libmysqlclient.a  lib
 
-	echo `date +"%x %X"` "Exporting the mysqlapi conan package." 
-	conan export-pkg  .  mysqlapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  -pr profile.txt  --force  -s compiler.version="$GCC_VERSION"
-	res=$?
-	if [ $? -ne 0 ]; then
-		echo `date +"%x %X"` "conan export-pkg failed with error code $res." 
-		return $res
-	fi
+# 	echo `date +"%x %X"` "Exporting the mysqlapi conan package." 
+# 	conan export-pkg  .  mysqlapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  -pr profile.txt  --force  -s compiler.version="$GCC_VERSION"
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan export-pkg failed with error code $res." 
+# 		return $res
+# 	fi
 
-	echo `date +"%x %X"` "Uploading the mysqlapi conan package to JFrog." 
-	conan upload  -r jfrog  mysqlapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  --all  --no-overwrite recipe 
-	res=$?
-	if [ $? -ne 0 ]; then
-		echo `date +"%x %X"` "conan upload failed with error code $res." 
-		return $res
-	fi
+# 	echo `date +"%x %X"` "Uploading the mysqlapi conan package to JFrog." 
+# 	conan upload  -r jfrog  mysqlapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  --all  --no-overwrite recipe 
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan upload failed with error code $res." 
+# 		return $res
+# 	fi
 
-	popd
-}
+# 	popd
+# }
 
-# Packages the Sparrow API into a conan package and uploads it to the conan repository on jfrog.
+# # Packages the Sparrow API into a conan package and uploads it to the conan repository on jfrog.
 
-generate_sparrowapi_conan_pack() {
-	pushd $1
+# generate_sparrowapi_conan_pack() {
+# 	pushd $1
 
-	echo `date +"%x %X"` "Packaging the Sparrow API into a conan package, version $SPARROW_BUILD_NUM, $BUILD_MODE." 
-	rm  -Rf  _conan/sparrowapi
-	mkdir -p _conan/sparrowapi
-	cd _conan/sparrowapi
+# 	echo `date +"%x %X"` "Packaging the Sparrow API into a conan package, version $SPARROW_BUILD_NUM, $BUILD_MODE." 
+# 	rm  -Rf  _conan/sparrowapi
+# 	mkdir -p _conan/sparrowapi
+# 	cd _conan/sparrowapi
 
-	cp  $SOURCE_ROOT_FOLDER/conan/lnx_64/profile.txt  profile.txt
-	cp  $SOURCE_ROOT_FOLDER/conan/conanfile.sparrowapi.py  conanfile.py
-	sed -E "s/version[ \t]*=[ \t]*\".*\"/version = \"$SPARROW_BUILD_NUM\"/" conanfile.py > conanfile.new.py
-	mv -f conanfile.new.py conanfile.py
-	rm -f conanfile.new.py
+# 	cp  $SOURCE_ROOT_FOLDER/conan/lnx_64/profile.txt  profile.txt
+# 	cp  $SOURCE_ROOT_FOLDER/conan/conanfile.sparrowapi.py  conanfile.py
+# 	sed -E "s/version[ \t]*=[ \t]*\".*\"/version = \"$SPARROW_BUILD_NUM\"/" conanfile.py > conanfile.new.py
+# 	mv -f conanfile.new.py conanfile.py
+# 	rm -f conanfile.new.py
 
-	if [ $BUILD_MODE = "debug"  ]; then
-		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Debug/" profile.txt > profile.new.txt
-	else
-		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Release/" profile.txt > profile.new.txt
-	fi
-	mv -f profile.new.txt  profile.txt
-	rm -f profile.new.txt
+# 	if [ $BUILD_MODE = "debug"  ]; then
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Debug/" profile.txt > profile.new.txt
+# 	else
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Release/" profile.txt > profile.new.txt
+# 	fi
+# 	mv -f profile.new.txt  profile.txt
+# 	rm -f profile.new.txt
 
-	mkdir lib include
-	cp  ../../lib/libsparrowapi.so  lib
-	cp  -r $SOURCE_ROOT_FOLDER/storage/sparrow/api/include/* include
+# 	mkdir lib include
+# 	cp  ../../lib/libsparrowapi.so  lib
+# 	cp  -r $SOURCE_ROOT_FOLDER/storage/sparrow/api/include/* include
 
-	echo `date +"%x %X"` "Exporting the sparrowapi conan package." 
-	conan export-pkg  .  sparrowapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  -pr profile.txt  --force  -s compiler.version="$GCC_VERSION"
-	res=$?
-	if [ $? -ne 0 ]; then
-		echo `date +"%x %X"` "conan export-pkg failed with error code $res." 
-		return $res
-	fi
+# 	echo `date +"%x %X"` "Exporting the sparrowapi conan package." 
+# 	conan export-pkg  .  sparrowapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  -pr profile.txt  --force  -s compiler.version="$GCC_VERSION"
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan export-pkg failed with error code $res." 
+# 		return $res
+# 	fi
 
-	echo `date +"%x %X"` "Uploading the sparrowapi conan package to JFrog." 
-	conan upload  -r jfrog  sparrowapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  --all  --no-overwrite recipe
-	res=$?
-	if [ $? -ne 0 ]; then
-		echo `date +"%x %X"` "conan upload failed with error code $res." 
-		return $res
-	fi
+# 	echo `date +"%x %X"` "Uploading the sparrowapi conan package to JFrog." 
+# 	conan upload  -r jfrog  sparrowapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  --all  --no-overwrite recipe
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan upload failed with error code $res." 
+# 		return $res
+# 	fi
 
-	popd
-}
+# 	popd
+# }
 
 # ---------------- Script actually starts here  ---------------------
 
