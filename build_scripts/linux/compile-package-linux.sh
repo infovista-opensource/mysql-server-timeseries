@@ -60,7 +60,7 @@ generate_version_file()
 # This generic package will then be used to create the docker images of the dbsrv and poller runtime. 
 generate_distrib_pack() {
 
-	echo `date +"%x %X"` "Packaging all binaries and dependencies into a single package $4." 
+	echo `date +"%x %X"` "Packaging all binaries and dependencies into a single package." 
 
 	pushd $2
 	rm -rf _distrib_tmp > /dev/null 2>&1
@@ -101,7 +101,7 @@ generate_distrib_pack() {
 
 generate_mysqlapi_pack() {
 
-	echo `date +"%x %X"` "Packaging MySQL API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package $4." 
+	echo `date +"%x %X"` "Packaging MySQL API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package." 
 
 	pushd $2
 
@@ -139,7 +139,7 @@ generate_mysqlapi_pack() {
 
 generate_sparrowapi_pack() {
 
-	echo `date +"%x %X"` "Packaging Sparrow API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package $4." 
+	echo `date +"%x %X"` "Packaging Sparrow API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package." 
 
 	pushd $2
 
@@ -364,21 +364,21 @@ if [ "$DO_NOT_PACK" = true ]; then
 fi
 
 echo `date +"%x %X"` "Generating the distribution package which contains the binaries and configuration files to be deployed."
-generate_distrib_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  $distrib_dir  mysql-ts-srv-$SPARROW_BUILD_NUM-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}
+generate_distrib_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  $distrib_dir
 if [ $? -ne 0 ]; then
 	echo Failed to generate distribution package.
 	exit 1
 fi
 
 echo `date +"%x %X"` "Generating the MySQL API package which includes the header files and the library."
-generate_mysqlapi_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  $distrib_dir  mysqlapi-$SPARROW_BUILD_NUM-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}
+generate_mysqlapi_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  $distrib_dir
 if [ $? -ne 0 ]; then
 	echo Failed to generate MySQL API package.
 	exit 1
 fi
 
 echo `date +"%x %X"` "Generating the Sparrow API package which includes the header files and the library."
-generate_sparrowapi_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  $distrib_dir  sparrowapi-$SPARROW_BUILD_NUM-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}
+generate_sparrowapi_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/Linux/TGZ/mysql-$MYSQL_TAG-linux-x86_64  $distrib_dir
 if [ $? -ne 0 ]; then
 	echo Failed to generate Sparrow API package.
 	exit 1
