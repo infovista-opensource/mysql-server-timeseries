@@ -78,7 +78,7 @@ generate_distrib_pack() {
 	mkdir -p $distrib_folder/lib/plugin
 	cp  $1/storage/sparrow/udf/libsparrowudf.so  $distrib_folder/lib/plugin
 
-	generate_version_file $2 distrib_folder
+	generate_version_file $2 $distrib_folder
 
 	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
 	package_name=mysql-ts-srv-$mysqld_version-lnx${REDHAT_VERSION}-x64-${BUILD_MODE}.tar.gz
