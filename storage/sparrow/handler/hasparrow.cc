@@ -679,7 +679,9 @@ Column SparrowHandler::createColumn(const char* name, const enum_field_types fie
 
 	// Strings must be UTF-8. All UTF-8 collations are allowed, so we check
 	// only the character set.
-	if (type == COL_STRING && strcmp(charset->csname, "utf8mb4") != 0) {
+	// New tables are always createed using the utf8mb4 character set. But databases that have been upgraded from MySQL 5.6
+	// may have tables with utf8mb3. We allow this for backward compatibility.
+	if (type == COL_STRING && (strcmp(charset->csname, "utf8mb4") != 0 && strcmp(charset->csname, "utf8mb3") != 0)) {
 		throw SparrowException::create(false, "string column `%s` must be UTF-8", name);
 	}
 
