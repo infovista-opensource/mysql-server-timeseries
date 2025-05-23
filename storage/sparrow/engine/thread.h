@@ -54,7 +54,7 @@ public:
 		info_.m_key = &key_;
 		const size_t l = strlen(name);
 		const char* os_name = name;
-		os_name += (l >= PFS_MAX_OS_NAME_LENGTH ? (l - PFS_MAX_OS_NAME_LENGTH + 1) : 0);
+		os_name += (l >= PFS_MAX_OS_NAME_LENGTH - 3 ? (l - (PFS_MAX_OS_NAME_LENGTH - 3) + 1) : 0);
 		info_.m_os_name = my_strdup(PSI_INSTRUMENT_ME, os_name, MYF(MY_WME));
 
 		name += l > PFS_MAX_INFO_NAME_LENGTH ? (l - PFS_MAX_INFO_NAME_LENGTH) : 0;
@@ -196,7 +196,8 @@ private:
 		info_.m_key = &key_;
 		const size_t l = strlen(name);
 		const char* os_name = name;
-		os_name += (l >= PFS_MAX_OS_NAME_LENGTH ? (l - PFS_MAX_OS_NAME_LENGTH + 1) : 0);
+		//os_name += (l >= PFS_MAX_OS_NAME_LENGTH ? (l - PFS_MAX_OS_NAME_LENGTH + 1) : 0);
+		os_name += (l >= PFS_MAX_OS_NAME_LENGTH - 3 ? (l - (PFS_MAX_OS_NAME_LENGTH - 3) + 1) : 0);
 		info_.m_os_name = my_strdup(PSI_INSTRUMENT_ME, os_name, MYF(MY_WME));
 
 		name += l > PFS_MAX_INFO_NAME_LENGTH ? (l - PFS_MAX_INFO_NAME_LENGTH) : 0;
