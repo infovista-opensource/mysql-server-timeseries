@@ -1,3 +1,5 @@
+Copyright (C) 1989, 1991 Infovista
+
 The MySQL Timeseries Server is a fork of the offcial Oracle MySQL repository, in which a specific storage engine has been added. This SE, called Sparrow, is focused on optimizing insertion and retrieval of timestamped data. To benefit from the performance optimization, data must be 1) inserted in chronological order, and 2) inserted via the specific sparrow API (not regular SQL INSERT queries). 
 
 The Sparrow SE has been added into branch 8.0 and 8.4. Insertion into trunk is currenlty not planned. 
