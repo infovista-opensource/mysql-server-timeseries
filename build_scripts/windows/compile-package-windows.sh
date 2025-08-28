@@ -1,201 +1,429 @@
 #!/bin/bash
-#Arg 1 : Build directory. Example: C:\temp\builds\mysql-4.2\5.6.46-42010-SPW-370.
-#Arg 2 : mysql tag (version). Example: 5.6.46
-#Arg 3 : Sparrow build number. Example: 42010-SPW-370
-#Arg 4 : win64 or win32.
+#Arg 1 : Sparrow build number. Example: 4.2.123, or 4.2.123-SPW-387
+#Arg 2 : debug or release build.
+#Arg 3 : Options. If set to "do_not_build", the script will setup the build env, but won't start the build.
+#		 If set to "do_not_pack", the script will setup the build env, compiles everything but does not generate the packages.
 
-echo "Source directory $1"
-echo "Mysql version $2"
-echo "Build number $3"
-echo "Build type $4"
 
-generate() {
-	# First delete any previous zip file left behind
-	rm -f $2 $3 $4
+# ---------------- Checking argument ---------------------
+#  and initializing some global variables
+
+SPARROW_BUILD_NUM=$1
+echo `date +"%x %X"` "Build number $SPARROW_BUILD_NUM"
+
+BUILD_MODE=$2
+if [ -z "$BUILD_MODE" ] ; then
+	BUILD_MODE=release
+fi
+echo `date +"%x %X"` "Build mode $2"
+
+OPTIONS=$3
+if [ -n "$OPTIONS" ]; then
+	echo `date +"%x %X"` "Build options $OPTIONS"
+fi
+
+# Used only for dev purposes
+DO_NOT_BUILD=false
+if [ "$OPTIONS" == "do_not_build" ] ; then
+	DO_NOT_BUILD=true
+fi
+echo "DO_NOT_BUILD is $DO_NOT_BUILD"
+
+# Used only for dev purposes
+DO_NOT_PACK=false
+if [ "$OPTIONS" == "do_not_pack" ] ; then
+	DO_NOT_PACK=true
+fi
+echo "DO_NOT_PACK is $DO_NOT_PACK"
+
+SCRIPT_NAME=$(basename "$0")
+SCRIPT_DIR=$( cd -- "$( dirname -- "$0" )" &> /dev/null && pwd )
+echo `date +"%x %X"`  "$SCRIPT_NAME directory: $SCRIPT_DIR"
+
+cd $SCRIPT_DIR/../..;
+SOURCE_ROOT_FOLDER=`pwd`
+echo `date +"%x %X"` "Source root folder is $SOURCE_ROOT_FOLDER"
+
+
+generate_version_file()
+{
+	package_folder=$1
+	distrib_folder=$2
+
+	echo `date +"%x %X"` "Generating version file in $distrib_folder."
 	
-	pushd $1
-	rm -rf share/Makefile* share/*.sql share/*.txt
-	zip -r -9 $2 bin share
-	popd
-	pushd storage/sparrow/udf/$5
-	rm -rf lib
-	mkdir lib
-	mkdir lib/plugin
-	cp sparrowudf.dll lib/plugin/
-	cp sparrowudf.lib lib/plugin/
-	cp sparrowudf.pdb lib/plugin/
-	zip -r -9 $2 lib
-	rm -rf lib
-	popd
-	
-	pushd ../../storage/sparrow/api
-	zip -r -9 $3 include
-	popd
-	pushd storage/sparrow/$5
-	zip -r -9 $3 sparrowapi.dll sparrowapi.lib sparrowapi.pdb
-	popd
-	
-	pushd $1
-	zip -r -9 $4 include
-	popd
-	pushd libmysql/$5
-	zip -r -9 $4 libmysql.dll libmysql.lib libmysql.pdb
+	echo -n "MySQL Timeseries server" > $distrib_folder/version.txt
+	$package_folder/bin/mysqld --version | awk -F'mysqld' '{print $2}' >> $distrib_folder/version.txt
+}
+
+# Make a package containing everything: the mysql server files and tools, the libmysqlclient API and the sparrow API.
+# This generic package will then be used to create the docker images of the dbsrv and poller runtime. 
+generate_distrib_pack() {
+
+	echo `date +"%x %X"` "Packaging all binaries and dependencies into a single package." 
+
+	pushd $2
+	rm -rf _distrib_tmp > /dev/null 2>&1
+
+	echo `date +"%x %X"` "Gathering all required files for a DB server installation." 
+	distrib_folder=_distrib_tmp/mysql_${BUILD_MODE}
+	mkdir -p $distrib_folder
+	cp -ra share bin lib $distrib_folder
+
+	# echo `date +"%x %X"` "Gathering files for libmysqlclient API." 
+	# cp -a lib/libmysqlclient.so*  $distrib_folder/lib
+	# cp -a /lib64/libssl.so*  /lib64/libcrypto.so*  $distrib_folder/lib
+
+	# echo `date +"%x %X"` "Gathering files for Sparrow UDF plugin." 
+	# mkdir -p $distrib_folder/lib/plugin
+	# cp  $1/storage/sparrow/udf/libsparrowudf.so  $distrib_folder/lib/plugin
+
+	generate_version_file $2 $distrib_folder
+
+	mysqld_version=`bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	package_name=mysql-ts-srv-$mysqld_version-win64-${BUILD_MODE}.tar.gz
+
+	echo `date +"%x %X"` "Packaging everything into the compressed file $3/$package_name." 
+	cd $distrib_folder
+
+	# First delete any previous zip file left behind in the _distrib folder
+	rm -f $3/$package_name > /dev/null 2>&1
+
+	tar -czvf  $3/$package_name  *
+	res=$?
+	if [ $? -ne 0 ]; then
+		echo `date +"%x %X"` "Tar gzip all files into a package failed." 
+		return $res
+	fi
+
 	popd
 }
 
-build_dir=$1/_build
+generate_mysqlapi_pack() {
+
+	echo `date +"%x %X"` "Packaging MySQL API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package." 
+
+	pushd $2
+
+	echo `date +"%x %X"` "Gathering all required files for the MySQL client API." 
+	distrib_folder=_distrib_tmp/mysqlapi_${BUILD_MODE}
+	rm -rf $distrib_folder > /dev/null 2>&1
+	mkdir -p $distrib_folder
+	cd $distrib_folder
+
+	mkdir lib include
+	cp -r ../../include/*  include
+	cp -a ../../lib/libmysql.*  lib
+	# cp -a /lib64/libssl.so*  /lib64/libcrypto.so*  $distrib_folder/lib
+
+	generate_version_file $2 .
+
+	mysqld_version=`$2/bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	package_name=mysqlapi-$mysqld_version-win64-${BUILD_MODE}.tar.gz
+
+	echo `date +"%x %X"` "Packaging mysql api into the compressed file $3/$package_name." 
+
+	# First delete any previous zip file left behind in the _distrib folder
+	rm -f $3/$package_name > /dev/null 2>&1
+
+	tar -czvf  $3/$package_name  *
+	res=$?
+	if [ $? -ne 0 ]; then
+		echo `date +"%x %X"` "Tar gzip all files into a package failed." 
+		return $res
+	fi
+
+	popd
+}
+
+
+generate_sparrowapi_pack() {
+
+	echo `date +"%x %X"` "Packaging Sparrow API library and headers, version $SPARROW_BUILD_NUM, $BUILD_MODE, into a single package." 
+
+	pushd $2
+
+	echo `date +"%x %X"` "Gathering all required files for the MySQL client API." 
+	distrib_folder=_distrib_tmp/sparrowapi_${BUILD_MODE}
+	rm -rf $distrib_folder > /dev/null 2>&1
+	mkdir -p $distrib_folder
+	cd $distrib_folder
+
+	mkdir lib include
+	cp  -r $SOURCE_ROOT_FOLDER/storage/sparrow/api/include/* include
+	cp  -a ../../lib/sparrowapi.*  lib
+
+	generate_version_file $2 .
+
+	mysqld_version=`$2/bin/mysqld --version | grep -oP 'mysql-\K[0-9]+\.[0-9]+\.[0-9]+'`
+	package_name=sparrowapi-$mysqld_version-win64-${BUILD_MODE}.tar.gz
+
+	echo `date +"%x %X"` "Packaging sparrow api into the compressed file $3/$package_name." 
+
+	# First delete any previous zip file left behind in the _distrib folder
+	rm -f $3/$package_name > /dev/null 2>&1
+
+	tar -czvf  $3/$package_name  *
+	res=$?
+	if [ $? -ne 0 ]; then
+		echo `date +"%x %X"` "Tar gzip all files into a package failed." 
+		return $res
+	fi
+
+	popd
+}
+
+
+
+# Packages the libmysqlclient API into a conan package and uploads it to the conan repository on jfrog.
+# generate_mysqlapi_conan_pack() {
+# 	pushd $1
+
+# 	echo `date +"%x %X"` "Packaging the MySQL libmysqlclient API into a conan package, version $SPARROW_BUILD_NUM, $BUILD_MODE." 
+# 	rm  -Rf  _conan/mysqlapi
+# 	mkdir -p  _conan/mysqlapi
+# 	cd _conan/mysqlapi
+
+# 	cp  $SOURCE_ROOT_FOLDER/conan/win64/profile.txt  profile.txt
+# 	cp  $SOURCE_ROOT_FOLDER/conan/conanfile.mysqlapi.py  conanfile.py
+# 	sed -E "s/version[ \t]*=[ \t]*\".*\"/version = \"$SPARROW_BUILD_NUM\"/" conanfile.py > conanfile.new.py
+# 	mv -f conanfile.new.py conanfile.py
+# 	rm -f conanfile.new.py
+
+# 	if [ $BUILD_MODE = "debug"  ]; then
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Debug/" profile.txt > profile.new.txt
+# 	else
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Release/" profile.txt > profile.new.txt
+# 	fi
+# 	mv -f profile.new.txt  profile.txt
+# 	rm -f profile.new.txt
+
+# 	mkdir lib include
+# 	cp -r ../../include/*  include
+# 	cp ../../lib/libmysqlclient.so  ../../lib/libmysqlclient.a  lib
+
+# 	echo `date +"%x %X"` "Exporting the mysqlapi conan package." 
+# 	conan export-pkg  .  mysqlapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  -pr profile.txt  --force  -s compiler.version="$GCC_VERSION"
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan export-pkg failed with error code $res." 
+# 		return $res
+# 	fi
+
+# 	echo `date +"%x %X"` "Uploading the mysqlapi conan package to JFrog." 
+# 	conan upload  -r jfrog  mysqlapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  --all  --no-overwrite recipe 
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan upload failed with error code $res." 
+# 		return $res
+# 	fi
+
+# 	popd
+# }
+
+# # Packages the Sparrow API into a conan package and uploads it to the conan repository on jfrog.
+
+# generate_sparrowapi_conan_pack() {
+# 	pushd $1
+
+# 	echo `date +"%x %X"` "Packaging the Sparrow API into a conan package, version $SPARROW_BUILD_NUM, $BUILD_MODE." 
+# 	rm  -Rf  _conan/sparrowapi
+# 	mkdir -p _conan/sparrowapi
+# 	cd _conan/sparrowapi
+
+# 	cp  $SOURCE_ROOT_FOLDER/conan/win64/profile.txt  profile.txt
+# 	cp  $SOURCE_ROOT_FOLDER/conan/conanfile.sparrowapi.py  conanfile.py
+# 	sed -E "s/version[ \t]*=[ \t]*\".*\"/version = \"$SPARROW_BUILD_NUM\"/" conanfile.py > conanfile.new.py
+# 	mv -f conanfile.new.py conanfile.py
+# 	rm -f conanfile.new.py
+
+# 	if [ $BUILD_MODE = "debug"  ]; then
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Debug/" profile.txt > profile.new.txt
+# 	else
+# 		sed -E "s/BUILD_MODE[ \t]*=[ \t]*.*/BUILD_MODE=Release/" profile.txt > profile.new.txt
+# 	fi
+# 	mv -f profile.new.txt  profile.txt
+# 	rm -f profile.new.txt
+
+# 	mkdir lib include
+# 	cp  ../../lib/sparrowapi.so  lib
+# 	cp  -r $SOURCE_ROOT_FOLDER/storage/sparrow/api/include/* include
+
+# 	echo `date +"%x %X"` "Exporting the sparrowapi conan package." 
+# 	conan export-pkg  .  sparrowapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  -pr profile.txt  --force  -s compiler.version="$GCC_VERSION"
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan export-pkg failed with error code $res." 
+# 		return $res
+# 	fi
+
+# 	echo `date +"%x %X"` "Uploading the sparrowapi conan package to JFrog." 
+# 	conan upload  -r jfrog  sparrowapi/${SPARROW_BUILD_NUM}@ativanet-poller/stable  --all  --no-overwrite recipe
+# 	res=$?
+# 	if [ $? -ne 0 ]; then
+# 		echo `date +"%x %X"` "conan upload failed with error code $res." 
+# 		return $res
+# 	fi
+
+# 	popd
+# }
+
+# ---------------- Script actually starts here  ---------------------
+
+# env | sort;
+
+# REDHAT_VERSION=`sed -e 's/.*release \([0-9]*\).*/\1/' /etc/redhat-release`
+# echo `date +"%x %X"` "Running on RedHat version $REDHAT_VERSION"
+
+# GCC_VERSION=`gcc --version | head -n1 | sed -e 's/.*(GCC) \([0-9].[0-9]*\).*/\1/'`
+# echo `date +"%x %X"` "gcc version is $GCC_VERSION"
+
+# # Execute the conan script to get the openssl third party lib
+# echo `date +"%x %X"` "Executing conan script"
+# cd $SOURCE_ROOT_FOLDER/build_scripts/conan/win64
+
+# No more packages are required from Conan: 
+#	Boost is included in the MySQL source code,
+#	openssl dev package is installed in the docker builder image.
+# . ./conan_download_pckgs.sh
+
+# if [ -z "$SSLDIR" ]; then
+# 	echo `date +"%x %X"` Missing SSLDIR
+# 	return 1
+# fi
+
+# if [ -z "$BOOSTDIR" ]; then
+# 	# Checks the MySQL source code includes the boost library it requires.
+# 	# If so, set the BOOSTDIR accordingly
+# 	cd $SOURCE_ROOT_FOLDER
+# 	if [ ! -d boost ]; then
+# 		echo `date +"%x %X"` Missing boost library.
+# 		return 1
+# 	fi
+
+# 	cd boost
+# 	BOOSTDIR_VER=`ls`
+# 	BOOSTDIR=$SOURCE_ROOT_FOLDER/boost/$BOOSTDIR_VER
+# else
+# 	BOOSTDIR=$BOOSTDIR/include
+# fi
+# echo `date +"%x %X"` Boost dir is $BOOSTDIR
+
+# Prepare the build folder which will contain the CMake resulting files and the compilation files
+#  and prepare the distrib build folder which will the subset of files we package and distribute.
+# export LD_LIBRARY_PATH=/usr/local/lib64:/usr/local/lib:$LD_LIBRARY_PATH
+
+build_dir=$SOURCE_ROOT_FOLDER/_build/win64
+mkdir -p  $build_dir
+
+distrib_dir=$SOURCE_ROOT_FOLDER/_distrib/win64
+mkdir -p  $distrib_dir
+
 cd $build_dir
 
+commented()
+{
+	echo `date +"%x %X"` "Creating $BUILD_MODE sub-dir in _build. Removing previous $BUILD_MODE sub-dir if it existed."
+	rm -Rf  $BUILD_MODE
+	mkdir  $BUILD_MODE
+	cd  $BUILD_MODE
+	build_dir_arch=$build_dir/$BUILD_MODE
 
-if [ $4 = "win32"  ]; then
+	# Build source code. Try to build and embed only the required modules. So remove from build all module that are not needed.
+	echo `date +"%x %X"` "Starting $BUILD_MODE build"
+	CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DBUILD_CONFIG=mysql_${BUILD_MODE} -DWITH_SSL=system"
+	echo "CMAKE_OPTIONS is " $CMAKE_OPTIONS
 
-	# Create win32 build dir, where cmake will output all its files and where the build is going to take place. Example: C:\temp\builds\mysql-4.2\5.6.46-42010-SPW-370\_build\win32
-	echo `date` "Creating win32 sub-dir of _build. Removing previous win32 sub-dir if it existed."
-	rm -rf win32
-	mkdir win32
-	cd win32
-	
-	echo `date` "Starting win32 cmake."
-	cmake ../.. -DCOMPILATION_COMMENT="build: $3" -G "Visual Studio 16 2019" -A x86 -DWITH_EMBEDDED_SERVER=0 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DWITH_SSL=T:\\core\\22.2\\openssl\\1.1.1s\\win32
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Win32 cmake of source code failed." 
-		exit $res
+	if [ $BUILD_MODE = "debug"  ]; then
+		cmake ../../.. $CMAKE_OPTIONS -DCOMPILATION_COMMENT="build: $SPARROW_BUILD_NUM" -DCMAKE_BUILD_MODE=Debug  
+	else
+		cmake ../../.. $CMAKE_OPTIONS -DCOMPILATION_COMMENT="build: $SPARROW_BUILD_NUM" -DCMAKE_BUILD_MODE=RelWithDebInfo 
 	fi
-	
-	echo `date` "Starting win32 debug build"
-	devenv mysql.sln /build Debug /project ALL_BUILD /out build_win32_debug.log
 	res=$?
 	if [ $res -ne 0 ]; then
-		echo `date` "Debug build of source code failed." 
-		exit $res
-	fi
-	
-	echo `date` "Generating debug package"
-	devenv mysql.sln /build Debug /project package /out build_win32_debug.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Packaging failed."
-		exit $res
-	fi
-	
-	echo `date` "Packaging done. Zipping debug distribution packages"
-	mkdir -p $1/_distrib/win32
-	distrib_dir=$1/_distrib/win32
-	generate _CPack_Packages/win32/ZIP/mysql-$2-winx32 $distrib_dir/mysql_debug.zip $distrib_dir/sparrowapi_debug.zip $distrib_dir/mysqlapi_debug.zip Debug 2>&1
-	
-
-	echo `date` "Starting win32 release build"
-	devenv mysql.sln /build RelWithDebInfo /project ALL_BUILD /out build_win32_release.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Release build of source code failed." 
-		exit $res
-	fi
-	
-	echo `date` "Generating release package"
-	devenv mysql.sln /build RelWithDebInfo /project package /out build_win32_release.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Packaging failed."
-		exit $res
-	fi
-	
-	echo `date` "Packaging done. Zipping debug distribution packages"
-	generate _CPack_Packages/win32/ZIP/mysql-$2-winx32 $distrib_dir/mysql_release.zip $distrib_dir/sparrowapi_release.zip $distrib_dir/mysqlapi_release.zip RelWithDebInfo 2>&1
-
-
-	echo `date` "Generating initial database"
-	devenv mysql.sln /build RelWithDebInfo /project initial_database /out build_win32_release.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Initial database build failed." 
-		exit $res
-	fi
-	
-	echo `date` "Cleaning up debug build"
-	rm -rf _CPack_Packages
-	devenv mysql.sln /clean Debug /out build_win32_debug.log
-	
-	echo `date` "Cleaning up release build"
-	rm -rf _CPack_Packages
-	devenv mysql.sln /clean RelWithDebInfo /out build_win32_release.log
-	
-	echo `date` "Win32 build finished"
-	
-else
-
-	# Create win64 build dir, where cmake will output all its files and where the build is going to take place. Example: R:\Sparrow\4.0\5.5.27-40061\_build\win64
-	echo `date` "Creating win64 sub-dir of _build. Removing previous win64 sub-dir if it existed."
-	rm -rf win64
-	mkdir win64
-	cd win64
-	
-	echo `date` "Starting win64 cmake."
-	cmake ../.. -DCOMPILATION_COMMENT="build: $3" -G "Visual Studio 16 2019" -A x64 -DWITH_EMBEDDED_SERVER=0 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DWITH_SSL=T:\\core\\22.2\\openssl\\1.1.1s\\win64
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Win64 cmake of source code failed." 
-		exit $res
-	fi
-	
-	echo `date` "Starting win64 debug build"
-	devenv mysql.sln /build Debug /project ALL_BUILD /out build_win64_debug.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Debug build of source code failed." 
-		exit $res
-	fi
-	
-	echo `date` "Generating debug package"
-	devenv mysql.sln /build Debug /project package /out build_win64_debug.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Packaging failed."
-		exit $res
-	fi
-	
-	echo `date` "Packaging done. Zipping debug distribution packages"
-	mkdir -p $1/_distrib/win64
-	distrib_dir=$1/_distrib/win64
-	generate _CPack_Packages/win64/ZIP/mysql-$2-winx64 $distrib_dir/mysql_debug.zip $distrib_dir/sparrowapi_debug.zip $distrib_dir/mysqlapi_debug.zip Debug 2>&1
-	
-
-	echo `date` "Starting win64 release build"
-	devenv mysql.sln /build RelWithDebInfo /project ALL_BUILD /out build_win64_release.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Release build of source code failed." 
-		exit $res
-	fi
-	
-	echo `date` "Generating release package"
-	devenv mysql.sln /build RelWithDebInfo /project package /out build_win64_release.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Packaging failed."
-		exit $res
-	fi
-	
-	echo `date` "Packaging done. Zipping debug distribution packages"
-	generate _CPack_Packages/win64/ZIP/mysql-$2-winx64 $distrib_dir/mysql_release.zip $distrib_dir/sparrowapi_release.zip $distrib_dir/mysqlapi_release.zip RelWithDebInfo 2>&1
-
-
-	echo `date` "Generating initial database"
-	devenv mysql.sln /build RelWithDebInfo /project initial_database /out build_win64_release.log
-	res=$?
-	if [ $res -ne 0 ]; then
-		echo `date` "Initial database build failed." 
-		exit $res
+		echo `date +"%x %X"` "Cmake for $BUILD_MODE build failed." 
+		return $res
 	fi
 
-	#echo `date` "Cleaning up debug build"
-	#rm -rf _CPack_Packages
-	#devenv mysql.sln /clean Debug /out build_win64_debug.log
-	
-	#echo `date` "Cleaning up release build"
-	#rm -rf _CPack_Packages
-	#devenv mysql.sln /clean RelWithDebInfo /out build_win64_release.log
-	
-	echo `date` "Win64 build finished"
+	if [ "$DO_NOT_BUILD" = true ]; then
+		echo `date +"%x %X"` "Build setup and CMake are done."
+		return 0
+	fi
+
+	# Compile everything
+	echo `date +"%x %X"` "Compiling source code..."
+	make package
+	echo `date +"%x %X"` "Compiling source code finished."
+}
+
+	# Test. To be removed
+	cd  $BUILD_MODE
+	build_dir_arch=$build_dir/$BUILD_MODE
+	echo `date +"%x %X"` "Build dir is $build_dir_arch"
+
+
+export PACKAGE_DIR=`ls -l $build_dir_arch/_CPack_Packages/win64/ZIP | grep mysql- | head -n1 | awk '{print $NF}'`
+echo `date +"%x %X"` "PACKAGE_DIR is $PACKAGE_DIR"
+
+export MYSQL_TAG=`echo $PACKAGE_DIR | sed -e 's/mysql-\([0-9.]*\)-.*/\1/'`
+echo `date +"%x %X"` "MySQL tag is $MYSQL_TAG"
+
+if [ "$DO_NOT_PACK" = true ]; then
+    echo `date +"%x %X"` "Source compilation is done. Packaging is skipped."
+    return 0
 fi
+
+commented_2()
+{
+	echo `date +"%x %X"` "Generating the distribution package which contains the binaries and configuration files to be deployed."
+	generate_distrib_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/win64/ZIP/mysql-$MYSQL_TAG-winx64  $distrib_dir
+	if [ $? -ne 0 ]; then
+		echo Failed to generate distribution package.
+		return 1
+	fi
+}
+
+echo `date +"%x %X"` "Generating the MySQL API package which includes the header files and the library."
+generate_mysqlapi_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/win64/ZIP/mysql-$MYSQL_TAG-winx64  $distrib_dir
+if [ $? -ne 0 ]; then
+	echo Failed to generate MySQL API package.
+	return 1
+fi
+
+echo `date +"%x %X"` "Generating the Sparrow API package which includes the header files and the library."
+generate_sparrowapi_pack  $build_dir_arch  $build_dir_arch/_CPack_Packages/win64/ZIP/mysql-$MYSQL_TAG-winx64  $distrib_dir
+if [ $? -ne 0 ]; then
+	echo Failed to generate Sparrow API package.
+	return 1
+fi
+
+# This needs to be changed to point to sourceforge or something
+# echo `date +"%x %X"` "Uploading distribution package $distrib_dir/sparrow-$SPARROW_BUILD_NUM.zip to JFrog generic package repository."
+# # curl --header "Authorization: Bearer $CI_JOB_TOKEN" --upload-file $distrib_dir/sparrow-$SPARROW_BUILD_NUM-x64-${BUILD_MODE}.zip  $CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/sparrow/$SPARROW_BUILD_NUM/sparrow-$SPARROW_BUILD_NUM-x64-${BUILD_MODE}.zip?select=package_file
+# curl -u ${RELEASE_GENERIC_USER}:${RELEASE_GENERIC_PASSWORD}  --upload-file $distrib_dir/sparrow-$SPARROW_BUILD_NUM-x64-${BUILD_MODE}.zip  ${RELEASE_GENERIC_REPO}/sparrow/$SPARROW_BUILD_NUM/sparrow-$SPARROW_BUILD_NUM-x64-${BUILD_MODE}.zip
+# if [ $? -ne 0 ]; then
+# 	echo Failed to upload distribution package.
+# 	return 1
+# fi
+
+# It will probably not work to upload packages to our private conan repo from infovista-opensource. Packahes will have to be uploaded to sourceforge or something and then
+#  downloaded from there in the Net Poller's docker pre-build scripts. 
+# echo `date +"%x %X"` "Packaging the mysql api for conan"
+# generate_mysqlapi_conan_pack  $build_dir_arch/_CPack_Packages/win64/ZIP/mysql-$MYSQL_TAG-winx64
+# if [ $? -ne 0 ]; then
+# 	echo Failed to make or upload conan package for the mysql api.
+# 	return 1
+# fi
+
+# echo `date +"%x %X"` "Packaging the sparrow api for conan"
+# generate_sparrowapi_conan_pack  $build_dir_arch/_CPack_Packages/win64/ZIP/mysql-$MYSQL_TAG-winx64
+# if [ $? -ne 0 ]; then
+# 	echo Failed to make or upload conan package for the sparrow api.
+# 	return 1
+# fi
+
+# echo `date +"%x %X"` Cleaning up
+# rm -rf _CPack_Packages
+# make clean
+
+echo `date +"%x %X"` $BUILD_MODE build finished

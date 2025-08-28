@@ -278,9 +278,9 @@ echo `date +"%x %X"` "Running on RedHat version $REDHAT_VERSION"
 GCC_VERSION=`gcc --version | head -n1 | sed -e 's/.*(GCC) \([0-9].[0-9]*\).*/\1/'`
 echo `date +"%x %X"` "gcc version is $GCC_VERSION"
 
-# Execute the conan script to get the openssl third party lib
-echo `date +"%x %X"` "Executing conan script"
-cd $SOURCE_ROOT_FOLDER/build_scripts/conan/lnx_64
+# # Execute the conan script to get the openssl third party lib
+# echo `date +"%x %X"` "Executing conan script"
+# cd $SOURCE_ROOT_FOLDER/build_scripts/conan/lnx_64
 
 # No more packages are required from Conan: 
 #	Boost is included in the MySQL source code,
