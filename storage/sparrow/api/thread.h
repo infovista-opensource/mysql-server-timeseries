@@ -65,7 +65,8 @@ public:
 			Guard guard(lock_);
 			stop_ = true;
 			notifyStop();
-			stopCond_.wait(2000, true);
+			join();
+			stop_ = false;
 		} 
 	}
 
@@ -88,6 +89,7 @@ protected:
 private:
 
 	static void* handler(void *p) {
+		PRINT_DBUG("Thread started");
 		Thread* thread = (Thread*)p;
 		thread->running_ = true;
 		thread->threadId_ = my_thread_self();

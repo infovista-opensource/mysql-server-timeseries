@@ -14,7 +14,8 @@ using namespace Sparrow;
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 //	Test
 
-Test::Test(const SQLparams& sql_params) : sql_params_(sql_params) {
+Test::Test(const SQLparams& sql_params) : sql_params_(sql_params)
+{
 	try
 	{
 		initialize();
@@ -29,20 +30,51 @@ Test::Test(const SQLparams& sql_params) : sql_params_(sql_params) {
 	}
 }
 
-Test::~Test() {
-	if ( connect_ ) {
-		if ( !connect_->isClosed() ) {
-			printf( "Disconnecting..." );
-			connect_->disconnect();
-			printf( "done\n" );
-		}
-		printf( "Deleting connection object..." );
-		delete connect_;
-		connect_= NULL;
-		printf( "done\n" );
-	}
 
+Test::~Test()
+{
+	disconnect(true);
 }
+
+
+void Test::connect()
+{
+	try
+	{
+		if (connect_ == nullptr) {
+			printf("Creating connection object.\n");
+			if (!(connect_ = createConnect()))
+				throw MyException::create(false, "Failed to get Connection object.");
+		}
+		printf("Setting connection properties.\n");
+		if (connect_->setProperties(sql_params_.getHost(), sql_params_.getLogin(), sql_params_.getPsswd(), sql_params_.getMySQLPort(), sql_params_.getSpwPort()) < 0)
+			throw MyException::create(false, "Failed to set Properties.");
+		printf("Connecting...\n");
+		if (connect_->connect() < 0)
+			throw MyException::create(false, "Failed to set Connect to Sparrow.");
+		printf("Connected.\n");
+	}
+	catch (const MyException& e) {
+		printf("Failed to connect to Sparrow: %s : %s\n", e.getText(), errmsg());
+	}
+}
+
+void Test::disconnect(bool free_object)
+{
+	if (connect_ != nullptr) {
+		if (!connect_->isClosed()) {
+			printf("Disconnecting...\n");
+			connect_->disconnect();
+			printf("Disconnected.\n");
+		}
+		if (free_object) {
+			delete connect_;
+			connect_ = nullptr;
+			printf("Deleted connection object.\n");
+		}
+	}
+}
+
 
 void Test::dropTable(const char* table_name) {
 	printf( "Dropping Sparrow table '%s'.'%s' ...", sql_params_.getSchema(), table_name);

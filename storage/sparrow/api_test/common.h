@@ -13,11 +13,14 @@ class Test {
 
 protected:
 	SQLparams		sql_params_;
-	Sparrow::Connection*		connect_;
+	Sparrow::Connection* connect_{ nullptr };
 
 public:
 	Test(const SQLparams& sql_params);
 	virtual ~Test();
+
+	void connect();
+	void disconnect(bool free_object=false);
 
 	void reset(Sparrow::Table*& table);
 	void dropTable(const char* table_name);

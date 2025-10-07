@@ -231,6 +231,8 @@ public:
 	void run();
 
 public:
+	void setReconnect(bool reconnect) { reconnect_ = reconnect; }
+
 	void runMasterFileTest(const Table*);
 	void runGetTableTest(const Table* table);
 	void runDisableCoalescingGlobTest(bool loop=false);
@@ -239,6 +241,9 @@ public:
 	void sendSampleData(const Table* table);
 	void sendErrorData(const Table* table);
 	void sendDataFlow(const Table* table);
+
+private:
+	bool reconnect_{ false };
 };
 
 #endif	// _spw_test_all_types_h

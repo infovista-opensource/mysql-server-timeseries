@@ -23,6 +23,10 @@ void TestAlltypes::run() {
 		printf("OK\n");
 
 		runMasterFileTest( table.get() );
+		if (reconnect_) {
+			disconnect();
+			connect();
+		}
 
 		runGetTableTest( table.get() );
 

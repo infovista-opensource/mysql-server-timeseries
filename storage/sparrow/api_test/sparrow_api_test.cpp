@@ -18,7 +18,7 @@
 #include "too_many_columns.h"
 #include "vl.h"
 
-//#define TEST_BASIC
+#define TEST_BASIC
 //#define TEST_CREATETABLE_TOO_MANY_COLS
 //#define TEST_COALESCING
 //#define TEST_CREATETABLE
@@ -31,7 +31,7 @@
 //#define TEST_INSERT_INTERLACED_TS_MASS
 //#define TEST_INSERT_SELECT_COLUMNS
 //#define TEST_INSERT_SELECT_COLUMNS_MASSIVE
-#define TEST_COLUMN_OPTIM
+//#define TEST_COLUMN_OPTIM
 //#define TEST_ERRORS
 //#define TEST_DISABLE_COALESCING
 
@@ -70,6 +70,7 @@ int main (int argc, char* argv[])
 
 #ifdef TEST_BASIC
 	TestAlltypes	test_all(sql_params);
+	test_all.setReconnect(true);
 	test_all.run();
 #endif
 
