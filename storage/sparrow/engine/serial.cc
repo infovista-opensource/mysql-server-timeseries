@@ -209,7 +209,12 @@ SocketWriter::SocketWriter(Connection& connection)
 }
 
 SocketWriter::~SocketWriter() {
-	flush();
+	try
+	{
+		flush();
+	} catch(const SparrowException& e) {
+		// Absorb any exception in destructor. 
+	}
 }
 
 void SocketWriter::flush() _THROW_(SparrowException) {

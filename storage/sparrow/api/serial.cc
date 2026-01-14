@@ -120,7 +120,12 @@ SocketWriter::SocketWriter(my_socket socketId)
 }
 
 SocketWriter::~SocketWriter() {
-	flush();
+	try
+	{
+		flush();
+	} catch(const SparrowException& e) {
+		// Absorb any exception in destructor. 
+	}
 	ByteBuffer::munmap(getData(), SocketWriter::size_);
 }
 
