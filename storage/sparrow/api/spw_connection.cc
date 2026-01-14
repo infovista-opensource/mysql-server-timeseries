@@ -295,7 +295,7 @@ RequestGuard spw_Connection::compressAndSendBuffer(Action action, const ByteBuff
 			}
 		}
 
-		// writer.flush is automatically done in its destructor
+		writer.flush();
 
 	} catch ( const SparrowException& e ) {
 		// Remove request from queue.
@@ -372,6 +372,9 @@ RequestGuard spw_Connection::compressAndSendBuffer(Action action, const BufferLi
 				}
 			}
 		}
+
+		writer.flush();
+		
 	} catch ( const SparrowException& e ) {
 		// Remove request from queue.
 		getRequest( request->id(), true );
