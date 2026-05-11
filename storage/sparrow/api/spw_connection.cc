@@ -129,8 +129,11 @@ int spw_Connection::connect()
 		Guard			lockGuard( lockSckt_ );
 		try
 		{
+			PRINT_DBUG("[spw_Connection::connect] Starting connection procedure...");
 			if ( socket_ != INVALID_SOCKET ) {
+				PRINT_DBUG("[spw_Connection::connect] Socket is currently open, disconnecting first...");
 				disconnectAndResetRqsts( SparrowException( "reconnecting" ), false );
+				PRINT_DBUG("[spw_Connection::connect] Socket disconnected.");
 			}
 
 			// Get address from string
@@ -148,6 +151,7 @@ int spw_Connection::connect()
 
 			// Connect to Sparrow server
 			socket_ = SocketUtil::createAndConnect( SOCK_STREAM, addr, srcAddr );
+			PRINT_DBUG("[spw_Connection::connect] Socket connected.");
 
 			// Initialize the fd_set structure
 			FD_ZERO(&fdSet_);
@@ -155,10 +159,15 @@ int spw_Connection::connect()
 			my_socket stopSocket = SocketUtil::getStopSocket();
 			if (stopSocket != INVALID_SOCKET) {
 				FD_SET(stopSocket, &fdSet_);
+				PRINT_DBUG("[spw_Connection::connect] Stop socket added to fdSet.");
 			}
+			PRINT_DBUG("[spw_Connection::connect] fdSet initialized.");
 
 			// Start listening thread
+			PRINT_DBUG("[spw_Connection::connect] Starting listening thread...");
 			start();
+			PRINT_DBUG("[spw_Connection::connect] Listening thread started.");
+
 		} catch(const SparrowException& e) {
 			disconnectAndResetRqsts( e, false );
 
@@ -170,8 +179,10 @@ int spw_Connection::connect()
 	try
 	{
 		// Authenticate
+		PRINT_DBUG("[spw_Connection::connect] Authenticating...");
 		RequestGuard	request = authenticate();
 		request->getResponse();
+		PRINT_DBUG("[spw_Connection::connect] Authentication successful.");
 
 	} catch(const SparrowException& e) {
 		spwerror = e;
@@ -199,23 +210,31 @@ void spw_Connection::disconnectAndResetRqsts( const SparrowException& e, bool lo
 // Closes connection socket to Sparrow and ends listenning thread if it's still running
 void spw_Connection::closeSocket( bool lock )
 {
+	PRINT_DBUG("[spw_Connection::closeSocket] Closing socket...");
+
 	if ( lock ) lockSckt_.lock();
 
 	//if ( endThread && isRunning() ) {
 	if ( isRunning() ) {
-		PRINT_DBUG("[spw_Connection::disconnect] Stopping thread...");
+		PRINT_DBUG("[spw_Connection::closeSocket] Stopping thread...");
 		stop();
+		PRINT_DBUG("[spw_Connection::closeSocket] Thread stopped.");
 	}
 
 	if ( socket_ != INVALID_SOCKET ) {
-		PRINT_DBUG("[spw_Connection::disconnect] Closing socket...");
+		PRINT_DBUG("[spw_Connection::closeSocket] Shutting down socket...");
 		::shutdown(socket_, SHUT_RDWR);
+		PRINT_DBUG("[spw_Connection::closeSocket] Socket shutdown.");
 		FD_CLR(socket_, &fdSet_);
+		PRINT_DBUG("[spw_Connection::closeSocket] Socket removed from fdSet.");
 		closesocket( socket_ );
+		PRINT_DBUG("[spw_Connection::closeSocket] Socket closed.");
 		socket_ = INVALID_SOCKET;
 	}
 
 	if ( lock ) lockSckt_.unlock();
+
+	PRINT_DBUG("[spw_Connection::closeSocket] Socket closed - END.");
 }
 
 
@@ -238,13 +257,13 @@ void spw_Connection::resetRqsts( const SparrowException& e )
 {
 	Guard	lockGuard( lockRqst_ );
 
-	PRINT_DBUG("[spw_Connection::disconnect] Reseting %u requests: %s...", requests_.entries(), e.getText() );
+	PRINT_DBUG("[spw_Connection::resetRqsts] Reseting %u requests: %s...", requests_.entries(), e.getText() );
 	SYSslistIterator<RequestGuard>	iterator(requests_);
 	while (++iterator) {
 		iterator.key()->exceptionReceived( e );
 	}
 	requests_.clear();
-	PRINT_DBUG("[spw_Connection::disconnect] Disconnected.");
+	PRINT_DBUG("[spw_Connection::resetRqsts] Disconnected.");
 }
 
 
@@ -453,7 +472,7 @@ bool spw_Connection::process()
 		//PRINT_DBUG("[spw_Connection::process] PACKET REC !");
 		// Read Header
 		Request*	request = NULL;
-		uint32_t		length, code, compressedLength;
+		uint32_t	length, code, compressedLength;
 
 		try
 		{

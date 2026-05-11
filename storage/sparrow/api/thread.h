@@ -50,22 +50,28 @@ public:
 	bool start() {
 		my_thread_attr_t attr;
 		my_thread_attr_init(&attr);
-		my_thread_attr_setdetachstate(&attr, MY_THREAD_CREATE_DETACHED);
+		//my_thread_attr_setdetachstate(&attr, MY_THREAD_CREATE_DETACHED);
 		my_thread_attr_setstacksize(&attr, 262144);
 		Guard guard(lock_);
+		PRINT_DBUG("[thread] Starting %s", m_name_ != nullptr ? m_name_ : "unknown");
 		if (my_thread_create(&thread_, &attr, reinterpret_cast<void*(*)(void*)>(handler), static_cast<void*>(this)) != 0 ) {
+			PRINT_DBUG("[thread] Failed to start %s", m_name_ != nullptr ? m_name_ : "unknown");
 			return false;
 		}
 		startCond_.wait(true);
+		PRINT_DBUG("[thread] Started %s", m_name_ != nullptr ? m_name_ : "unknown");
 		return true;
 	}
 
 	void stop() {
+		PRINT_DBUG("[thread] Stopping %s: running %s", m_name_ != nullptr ? m_name_ : "unknown", running_ ? "true" : "false");
 		if ( running_ ) {
 			Guard guard(lock_);
 			stop_ = true;
+			PRINT_DBUG("[thread] Notifying stop for %s", m_name_ != nullptr ? m_name_ : "unknown");
 			notifyStop();
 			join();
+			PRINT_DBUG("[thread] Stopped %s", m_name_ != nullptr ? m_name_ : "unknown");
 			stop_ = false;
 		} 
 	}
@@ -89,10 +95,10 @@ protected:
 private:
 
 	static void* handler(void *p) {
-		PRINT_DBUG("Thread started");
 		Thread* thread = (Thread*)p;
 		thread->running_ = true;
 		thread->threadId_ = my_thread_self();
+		PRINT_DBUG("[thread-hdlr %llu] Started %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 		thread->startCond_.signal();
 		while (!thread->stop_) {
 			if (!thread->process()) {
@@ -101,12 +107,13 @@ private:
 		}
 		thread->running_ = false;
 
-		PRINT_DBUG("Thread stopped!");
+		PRINT_DBUG("[thread-hdlr %llu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 		thread->stopCond_.signal();
 		/*if (thread->stop_) {
 			thread->stopCond_.signal();
 		} else {*/
 			if (thread->deleteAfterExit()) {
+				PRINT_DBUG("[thread-hdlr %llu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 				delete thread;
 			}
 		//}
