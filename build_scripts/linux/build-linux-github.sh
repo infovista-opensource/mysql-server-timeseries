@@ -34,7 +34,7 @@ OPTIONS=$2
 # echo "EXTRACT_ONLY is $EXTRACT_ONLY"
 
 if [ -z "$CI_COMMIT_TAG" ]; then
-    echo "Env variable CI_COMMIT_TAG is empty or not defined. It must be set to a valid tag values, such as 4.2.123 or 4.2.123-spw-287."
+    echo "Env variable CI_COMMIT_TAG is empty or not defined. It must be set to a valid tag values, such as 8.4.4-b or 8.4.4-spw-287."
     exit 1
 fi
 
