@@ -65,6 +65,11 @@ generate_distrib_pack() {
 	pushd $2
 	rm -rf _distrib_tmp > /dev/null 2>&1
 
+	if [ ! -f "bin/mysqld" ] && [ -f "bin/mysqld-debug" ]; then
+		echo `date +"%x %X"` "bin/mysqld not found, renaming bin/mysqld-debug to bin/mysqld."
+		mv "bin/mysqld-debug" "bin/mysqld"
+	fi
+
 	echo `date +"%x %X"` "Gathering all required files for a DB server installation." 
 	distrib_folder=_distrib_tmp/mysql_${BUILD_MODE}
 	mkdir -p $distrib_folder

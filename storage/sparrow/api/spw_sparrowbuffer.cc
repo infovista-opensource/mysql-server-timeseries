@@ -6,7 +6,7 @@
 
 #define SPW_TRY		try {
 #define SPW_CATCH	} catch ( const SparrowException& e ) {		\
-	PRINT_DBUG( e.getText() );	\
+	PRINT_DBUG( "%s", e.getText() );	\
 	spwerror = e;		\
 	return e.getErrcode(); \
 	}

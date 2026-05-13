@@ -98,7 +98,7 @@ private:
 		Thread* thread = (Thread*)p;
 		thread->running_ = true;
 		thread->threadId_ = my_thread_self();
-		PRINT_DBUG("[thread-hdlr %llu] Started %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
+		PRINT_DBUG("[thread-hdlr %lu] Started %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 		thread->startCond_.signal();
 		while (!thread->stop_) {
 			if (!thread->process()) {
@@ -107,13 +107,13 @@ private:
 		}
 		thread->running_ = false;
 
-		PRINT_DBUG("[thread-hdlr %llu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
+		PRINT_DBUG("[thread-hdlr %lu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 		thread->stopCond_.signal();
 		/*if (thread->stop_) {
 			thread->stopCond_.signal();
 		} else {*/
 			if (thread->deleteAfterExit()) {
-				PRINT_DBUG("[thread-hdlr %llu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
+				PRINT_DBUG("[thread-hdlr %lu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 				delete thread;
 			}
 		//}
