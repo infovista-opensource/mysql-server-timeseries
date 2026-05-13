@@ -3,6 +3,7 @@
 #Arg 2 : debug or release build.
 #Arg 3 : Options. If set to "do_not_build", the script will setup the build env, but won't start the build.
 #		 If set to "do_not_pack", the script will setup the build env, compiles everything but does not generate the packages.
+#		 If set to "pack_only", the script will only generate the packages without building.
 
 
 # ---------------- Checking argument ---------------------
@@ -35,6 +36,12 @@ if [ "$OPTIONS" == "do_not_pack" ] ; then
 	DO_NOT_PACK=true
 fi
 echo "DO_NOT_PACK is $DO_NOT_PACK"
+
+PACK_ONLY=false
+if [ "$OPTIONS" == "pack_only" ] ; then
+	PACK_ONLY=true
+fi
+echo "PACK_ONLY is $PACK_ONLY"
 
 SCRIPT_NAME=$(basename "$0")
 SCRIPT_DIR=$( cd -- "$( dirname -- "$0" )" &> /dev/null && pwd )
@@ -325,38 +332,42 @@ distrib_dir=$SOURCE_ROOT_FOLDER/_distrib/lnx${REDHAT_VERSION}_64
 mkdir -p  $distrib_dir
 
 cd $build_dir
-
-echo `date +"%x %X"` "Creating $BUILD_MODE sub-dir in _build. Removing previous $BUILD_MODE sub-dir if it existed."
-rm -Rf  $BUILD_MODE
-mkdir  $BUILD_MODE
-cd  $BUILD_MODE
 build_dir_arch=$build_dir/$BUILD_MODE
 
-# Build source code. Try to build and embed only the required modules. So remove from build all module that are not needed.
-echo `date +"%x %X"` "Starting $BUILD_MODE build"
-CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DBUILD_CONFIG=mysql_release -DWITH_SSL=system"
-echo "CMAKE_OPTIONS is " $CMAKE_OPTIONS
+if [ "$PACK_ONLY" = false ]; then
 
-if [ $BUILD_MODE = "debug"  ]; then
-	cmake ../../.. $CMAKE_OPTIONS -DCOMPILATION_COMMENT="build: $SPARROW_BUILD_NUM (debug)" -DWITH_DEBUG=1
-else
-	cmake ../../.. $CMAKE_OPTIONS -DCOMPILATION_COMMENT="build: $SPARROW_BUILD_NUM"
-fi
-res=$?
-if [ $res -ne 0 ]; then
-	echo `date +"%x %X"` "Cmake for $BUILD_MODE build failed." 
-	exit $res
-fi
+	echo `date +"%x %X"` "Creating $BUILD_MODE sub-dir in _build. Removing previous $BUILD_MODE sub-dir if it existed."
+	rm -Rf  $BUILD_MODE
+	mkdir  $BUILD_MODE
+	cd  $BUILD_MODE
 
-if [ "$DO_NOT_BUILD" = true ]; then
-    echo `date +"%x %X"` "Build setup and CMake are done."
-    exit 0
-fi
+	# Build source code. Try to build and embed only the required modules. So remove from build all module that are not needed.
+	echo `date +"%x %X"` "Starting $BUILD_MODE build"
+	CMAKE_OPTIONS="-DWITH_UNIT_TESTS=0 -DWITHOUT_GROUP_REPLICATION=1 -DWITHOUT_HEAP_STORAGE_ENGINE=1 -DWITHOUT_CSV_STORAGE_ENGINE=1 -DWITHOUT_ARCHIVE_STORAGE_ENGINE=1 -DWITHOUT_BLACKHOLE_STORAGE_ENGINE=1 -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 -DWITH_NDBCLUSTER_STORAGE_ENGINE=0 -DWITH_NDB=0 -DWITH_ROUTER=0 -DWITH_KERBEROS=none -DBUILD_CONFIG=mysql_release -DWITH_SSL=system"
+	echo "CMAKE_OPTIONS is " $CMAKE_OPTIONS
 
-# Compile everything
-echo `date +"%x %X"` "Compiling source code..."
-make package
-echo `date +"%x %X"` "Compiling source code finished."
+	if [ $BUILD_MODE = "debug"  ]; then
+		cmake ../../.. $CMAKE_OPTIONS -DCOMPILATION_COMMENT="build: $SPARROW_BUILD_NUM (debug)" -DWITH_DEBUG=1
+	else
+		cmake ../../.. $CMAKE_OPTIONS -DCOMPILATION_COMMENT="build: $SPARROW_BUILD_NUM"
+	fi
+	res=$?
+	if [ $res -ne 0 ]; then
+		echo `date +"%x %X"` "Cmake for $BUILD_MODE build failed." 
+		exit $res
+	fi
+
+	if [ "$DO_NOT_BUILD" = true ]; then
+		echo `date +"%x %X"` "Build setup and CMake are done."
+		exit 0
+	fi
+
+	# Compile everything
+	echo `date +"%x %X"` "Compiling source code..."
+	make package
+	echo `date +"%x %X"` "Compiling source code finished."
+
+fi		# if not pack only
 
 export PACKAGE_DIR=`ls -l $build_dir_arch/_CPack_Packages/Linux/TGZ | grep mysql- | head -n1 | awk '{print $NF}'`
 

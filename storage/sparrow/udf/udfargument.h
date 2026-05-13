@@ -66,10 +66,10 @@ public:
 	UdfArgumentString& operator = (const UdfArgumentString& src);
 
 	// set value
-	virtual void setValue(char* arg, unsigned long length);
+	virtual void setValue(char* arg, unsigned long length) override;
 
 	// return type of determiner
-	virtual Item_result getType() const;
+	virtual Item_result getType() const override;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,10 +94,10 @@ public:
 	UdfArgumentReal& operator = (const UdfArgumentReal& src);
 
 	// set value
-	virtual void setValue(char* arg, unsigned long length);
+	virtual void setValue(char* arg, unsigned long length) override;
 
 	// return type of determiner
-	Item_result getType() const;
+	Item_result getType() const override;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -122,10 +122,10 @@ public:
 	UdfArgumentInt& operator = (const UdfArgumentInt& src);
 
 	// set value
-	virtual void setValue(char* arg, unsigned long length);
+	virtual void setValue(char* arg, unsigned long length) override;
 
 	// return type of determiner
-	Item_result getType() const;
+	Item_result getType() const override;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -150,10 +150,10 @@ public:
 	UdfArgumentDecimal& operator = (const UdfArgumentDecimal& src);
 
 	// set value
-	virtual void setValue(char* arg, unsigned long length);
+	virtual void setValue(char* arg, unsigned long length) override;
 
 	// return type of determiner
-	Item_result getType() const;
+	Item_result getType() const override;
 };
 
 
