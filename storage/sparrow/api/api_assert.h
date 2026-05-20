@@ -45,7 +45,7 @@ inline void PRINT_ERR(const char* format, ...) {
 	va_end(args);
 }
 
-#ifdef NDEBUG
+// #ifdef NDEBUG
 
 #define PRINT_DBUG(...)
 #define PRINT_INFO(...)
@@ -53,7 +53,7 @@ inline void PRINT_ERR(const char* format, ...) {
 #define SPW_dbgASSERT(a)
 #define SPW_relASSERT(a) _SPW_ASSERT(a)
 
-#else
+// #else
 
 inline void PRINT_DBUG(const char* format, ...) {
 	va_list args;
@@ -77,7 +77,7 @@ inline void PRINT_INFO(const char* format, ...) {
 #define SPW_dbgASSERT(a) _SPW_ASSERT(a)
 #define SPW_relASSERT(a) _SPW_ASSERT(a)
 
-#endif
+// #endif
 
 
 #endif		// _spw_api_assert_h
