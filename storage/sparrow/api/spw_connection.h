@@ -198,7 +198,6 @@ private:
 	SYSslist<RequestGuard>	requests_;
 	RequestGuard getRequest(uint32_t id, bool remove);
 
-
 	// Request counter (used to generate Request::id_)
 	uint32_t		counter_;
 
@@ -206,8 +205,8 @@ private:
 	void resetRqsts(const SparrowException& e);
 
 	void sendHeader(SocketWriter& writer, uint32_t rqstId, uint32_t len, uint32_t comprLen, Action action);
-	RequestGuard compressAndSendBuffer(Action action, const ByteBuffer& buffer);
-	RequestGuard compressAndSendBuffer(Action action, const BufferList& buffer);
+	RequestGuard compressAndSendBuffer(Action action, const ByteBuffer& buffer, bool lock=true);
+	RequestGuard compressAndSendBuffer(Action action, const BufferList& buffer, bool lock=true);
 
 	RequestGuard authenticate() _THROW_(SparrowException);
 

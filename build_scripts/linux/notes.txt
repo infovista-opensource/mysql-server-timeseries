@@ -1,0 +1,9 @@
+Build manually
+==============
+
+docker run -dti  --rm  -v source:/data/source  --entrypoint bash  ghcr.io/infovista-opensource/mysql-server-timeseries-builder-images/mysql8-build-lnx8:0.5
+
+export CI_COMMIT_TAG=8.4.4-123456
+
+chmod a+x build_scripts/linux/build-linux-github.sh
+build_scripts/linux/build-linux-github.sh  release

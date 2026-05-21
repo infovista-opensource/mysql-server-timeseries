@@ -168,26 +168,33 @@ int spw_Connection::connect()
 			start();
 			PRINT_DBUG("[spw_Connection::connect] Listening thread started.");
 
-		} catch(const SparrowException& e) {
-			disconnectAndResetRqsts( e, false );
+			// Authenticate
+			PRINT_DBUG("[spw_Connection::connect] Authenticating...");
+			RequestGuard	request = authenticate();
+			request->getResponse();
+			PRINT_DBUG("[spw_Connection::connect] Authentication successful.");
 
+		} catch(const SparrowException& e) {
+			PRINT_DBUG("[spw_Connection::connect] Failed to connect socket and start listening thread: %s", e.getText());
+			disconnectAndResetRqsts( e, false );
 			spwerror = e;
 			return e.getErrcode();
 		}
 	}
 
-	try
+	/*try
 	{
 		// Authenticate
 		PRINT_DBUG("[spw_Connection::connect] Authenticating...");
 		RequestGuard	request = authenticate();
 		request->getResponse();
 		PRINT_DBUG("[spw_Connection::connect] Authentication successful.");
-
 	} catch(const SparrowException& e) {
+		PRINT_DBUG("[spw_Connection::connect] Failed to authenticate: %s", e.getText());
+		disconnectAndResetRqsts( e, true );
 		spwerror = e;
 		return e.getErrcode();
-	}
+	}*/
 
 	return 0;
 }
@@ -200,19 +207,19 @@ void spw_Connection::disconnect()
 
 
 // Complete cleanup. Stop listening thread, close socket and abort all pending requests (i.e. API calls)
-void spw_Connection::disconnectAndResetRqsts( const SparrowException& e, bool lock )
+void spw_Connection::disconnectAndResetRqsts( const SparrowException& e, bool doLock )
 {
-	closeSocket( lock );
+	closeSocket( doLock );
 	resetRqsts( e );
 }
 
 
 // Closes connection socket to Sparrow and ends listenning thread if it's still running
-void spw_Connection::closeSocket( bool lock )
+void spw_Connection::closeSocket( bool doLock )
 {
 	PRINT_DBUG("[spw_Connection::closeSocket] Closing socket...");
 
-	if ( lock ) lockSckt_.lock();
+	Guard			lockGuard( lockSckt_, doLock );
 
 	//if ( endThread && isRunning() ) {
 	if ( isRunning() ) {
@@ -231,8 +238,6 @@ void spw_Connection::closeSocket( bool lock )
 		PRINT_DBUG("[spw_Connection::closeSocket] Socket closed.");
 		socket_ = INVALID_SOCKET;
 	}
-
-	if ( lock ) lockSckt_.unlock();
 
 	PRINT_DBUG("[spw_Connection::closeSocket] Socket closed - END.");
 }
@@ -278,11 +283,11 @@ void spw_Connection::sendHeader( SocketWriter& writer, uint32_t rqstId, uint32_t
 }
 
 // Sends a single ByteBuffer
-RequestGuard spw_Connection::compressAndSendBuffer(Action action, const ByteBuffer& buffer)
+RequestGuard spw_Connection::compressAndSendBuffer(Action action, const ByteBuffer& buffer, bool doLock)
 {
 	RequestGuard	request( createNewRequest() );
 
-	Guard			lockGuard( lockSckt_ );
+	Guard			lockGuard( lockSckt_, doLock );
 	if ( socket_ == INVALID_SOCKET ) 
 		throw SparrowException( "Not connected", true, SPW_API_SOCKET_CONN_CLOSED );
 
@@ -331,19 +336,19 @@ RequestGuard spw_Connection::compressAndSendBuffer(Action action, const ByteBuff
 }
 
 // Sends a single ByteBuffer list
-RequestGuard spw_Connection::compressAndSendBuffer(Action action, const BufferList& buffer)
+RequestGuard spw_Connection::compressAndSendBuffer(Action action, const BufferList& buffer, bool doLock)
 {
 	const SYSvector<RefByteBuffer>&		buffers( buffer.getBuffers() );
 	if ( buffers.length() == 0 ) {
-		return compressAndSendBuffer( action, ByteBuffer() );
+		return compressAndSendBuffer( action, ByteBuffer(), doLock );
 	}
 	if ( buffers.length() == 1 ) {
-		return compressAndSendBuffer( action, *buffers[0] );
+		return compressAndSendBuffer( action, *buffers[0], doLock );
 	}
 
 	RequestGuard	request( createNewRequest() );
 
-	Guard			lockGuard( lockSckt_ );
+	Guard			lockGuard( lockSckt_, doLock );
 	if ( socket_ == INVALID_SOCKET ) 
 		throw SparrowException( "Not connected", true, SPW_API_SOCKET_CONN_CLOSED );
 
@@ -416,7 +421,9 @@ RequestGuard spw_Connection::authenticate() _THROW_(SparrowException)
 	ByteBuffer	buffer( data, sizeof(data) );
 	
 	{
-		Guard			lockGuard( lockSckt_ );
+		// No need to acquire lock since this block of code only works on local variables, except for properties_, 
+		//  but we are sure that no other thread can modify it at this stage.
+		//Guard			lockGuard( lockSckt_ );
 		buffer << properties_.user_;
 
 		const uint32_t length = properties_.pssw_.length();
@@ -438,7 +445,7 @@ RequestGuard spw_Connection::authenticate() _THROW_(SparrowException)
 		buffer << buff.limit() << buff;
 	}
 
-	return compressAndSendBuffer( AUTH, buffer );
+	return compressAndSendBuffer( AUTH, buffer, false );
 }
 
 // Reads incoming data on socket
