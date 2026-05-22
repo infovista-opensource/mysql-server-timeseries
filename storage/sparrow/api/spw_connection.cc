@@ -67,7 +67,8 @@ const uint8_t spw_Connection::TAG[] = { 83, 80, 65, 82, 82, 79, 87 };	// "SPARRO
 const uint8_t spw_Connection::SPARROW_API_VERSION = 1;
 
 spw_Connection::spw_Connection() : Thread("Listener"), 
-	lockSckt_(false, "socket lock"), lockRqst_(false, "requests lock"), compressionAlgorithm_(0)
+	lockSckt_(false, "socket lock"), lockRqst_(false, "requests lock"), lockAuth_(false, "authentication lock"), compressionAlgorithm_(0)
+	//, connected_(false)
 {
 	socket_ = INVALID_SOCKET;
 	counter_ = 0;
@@ -118,6 +119,7 @@ int spw_Connection::setProperties( const char* host, const char* user, const cha
 
 bool spw_Connection::isClosed() const
 {
+	Guard lockGuard( lockSckt_ );
 	return socket_ == INVALID_SOCKET;
 }
 
@@ -125,17 +127,17 @@ bool spw_Connection::isClosed() const
 // [PUBLIC] Create the socket, connect to Sparrow, starts the listening thread, send an authentication message.
 int spw_Connection::connect()
 {
+	Guard			lockGuard( lockAuth_ );
 	{
 		Guard			lockGuard( lockSckt_ );
+		PRINT_DBUG("[spw_Connection::connect] Starting connection procedure...");
+		if ( socket_ != INVALID_SOCKET ) {
+			PRINT_DBUG("[spw_Connection::connect] Socket is already connected, nothing to do...");
+			return 0;
+		}
+
 		try
 		{
-			PRINT_DBUG("[spw_Connection::connect] Starting connection procedure...");
-			if ( socket_ != INVALID_SOCKET ) {
-				PRINT_DBUG("[spw_Connection::connect] Socket is currently open, disconnecting first...");
-				disconnectAndResetRqsts( SparrowException( "reconnecting" ), false );
-				PRINT_DBUG("[spw_Connection::connect] Socket disconnected.");
-			}
-
 			// Get address from string
 			SocketAddress	addr	= SocketUtil::getAddress( properties_.host_.c_str(), properties_.port_ );
 			SocketAddress	srcAddr;
@@ -168,12 +170,6 @@ int spw_Connection::connect()
 			start();
 			PRINT_DBUG("[spw_Connection::connect] Listening thread started.");
 
-			// Authenticate
-			PRINT_DBUG("[spw_Connection::connect] Authenticating...");
-			RequestGuard	request = authenticate();
-			request->getResponse();
-			PRINT_DBUG("[spw_Connection::connect] Authentication successful.");
-
 		} catch(const SparrowException& e) {
 			PRINT_DBUG("[spw_Connection::connect] Failed to connect socket and start listening thread: %s", e.getText());
 			disconnectAndResetRqsts( e, false );
@@ -182,7 +178,7 @@ int spw_Connection::connect()
 		}
 	}
 
-	/*try
+	try
 	{
 		// Authenticate
 		PRINT_DBUG("[spw_Connection::connect] Authenticating...");
@@ -194,7 +190,7 @@ int spw_Connection::connect()
 		disconnectAndResetRqsts( e, true );
 		spwerror = e;
 		return e.getErrcode();
-	}*/
+	}
 
 	return 0;
 }

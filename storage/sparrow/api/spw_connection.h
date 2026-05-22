@@ -181,10 +181,12 @@ private:
 	static const uint8_t SPARROW_API_VERSION;
 
 	// Protect access to the socket, fdSet_ , properties_ and the listening thread
-	Lock		lockSckt_;
+	mutable Lock		lockSckt_;
 
 	// Protect access to the request list, requests_
 	Lock		lockRqst_;
+
+	Lock		lockAuth_;	// Protects the authentication process (only one thread can authenticate at a time)
 
 	// Socket to communicate with Sparrow
 	my_socket			socket_;
@@ -193,6 +195,9 @@ private:
 
 	// Listening thread
 	fd_set		fdSet_;
+
+	// Internal state of the connection
+	//bool		connected_;
 
 	// Array of currently active requests
 	SYSslist<RequestGuard>	requests_;
@@ -242,6 +247,17 @@ public:
 	void disconnect() override;
 
 	bool isClosed() const override;
+	
+	// bool isConnected() const override {
+	// 	Guard lockGuard( lockAuth_ );
+	// 	return connected_;
+	// }
+
+	// void setConnected(bool connected) {
+	// 	Guard lockGuard( lockAuth_ );
+	// 	connected_ = connected;
+	// }
+
 
 	Table* createTable() const override;
 	Table* getTable(const char* database, const char* table) override;

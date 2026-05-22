@@ -15,7 +15,7 @@ class Thread {
 public:
 
 	// Lock used by all start/stop condition variables.
-	static Lock lock_;
+	static Lock condLock_;
 
 private:
 
@@ -25,17 +25,15 @@ private:
 	volatile bool stop_;		// To signal a stop command to the thread
 	Cond startCond_;
 	Cond stopCond_;
+	Lock lock_;		// To protect the start/stop condition variables and the running_ and stop_ flags.
 
 protected:
 	my_thread_t threadId_;
 
 public:
 
-	// TODO: understand why the version with (Str() + Str()).c_str() does not compile
-	//Thread(const char* name) : running_(false), stop_(false), startCond_(false, lock_, (Str(name) + Str("::startCond_")).c_str()),
-	//	stopCond_(false, lock_, (Str(name) + Str("::stopCond_")).c_str()) {
-	Thread(const char* name) : running_(false), stop_(false), startCond_(false, lock_, "::startCond_"),
-		stopCond_(false, lock_, "::stopCond_"), threadId_(0) {
+	Thread(const char* name) : running_(false), stop_(false), startCond_(false, condLock_, "::startCond_"),
+		stopCond_(false, condLock_, "::stopCond_"), lock_(false, "thread lock"), threadId_(0) {
 		if (name != nullptr) {
 			m_name_ = my_strdup(name, MYF(MY_FAE));
 		}
@@ -107,13 +105,13 @@ private:
 		}
 		thread->running_ = false;
 
-		PRINT_DBUG("[thread-hdlr %lu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
+		PRINT_DBUG("[thread-hdlr %lu] Stopped [2] %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 		thread->stopCond_.signal();
 		/*if (thread->stop_) {
 			thread->stopCond_.signal();
 		} else {*/
 			if (thread->deleteAfterExit()) {
-				PRINT_DBUG("[thread-hdlr %lu] Stopped %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
+				PRINT_DBUG("[thread-hdlr %lu] Deleting %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
 				delete thread;
 			}
 		//}
