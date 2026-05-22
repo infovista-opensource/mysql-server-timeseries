@@ -105,8 +105,9 @@ private:
 		}
 		thread->running_ = false;
 
-		PRINT_DBUG("[thread-hdlr %lu] Stopped [2] %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
-		thread->stopCond_.signal();
+		PRINT_DBUG("[thread-hdlr %lu] Stopped [3] %s", thread->threadId_, thread->m_name_ != nullptr ? thread->m_name_ : "unknown");
+		// stopCond does not seem to be used. We rely on the thread join to ensure the thread has stopped before deleting it if needed.
+		// thread->stopCond_.signal();
 		/*if (thread->stop_) {
 			thread->stopCond_.signal();
 		} else {*/
