@@ -225,10 +225,11 @@ void spw_Connection::closeSocket( bool doLock )
 	}
 
 	if ( socket_ != INVALID_SOCKET ) {
+		PRINT_DBUG("[spw_Connection::closeSocket] Resetting fdSet.");
+//		FD_CLR(socket_, &fdSet_);
+		FD_ZERO(&fdSet_);
 		PRINT_DBUG("[spw_Connection::closeSocket] Shutting down socket...");
 		::shutdown(socket_, SHUT_RDWR);
-		PRINT_DBUG("[spw_Connection::closeSocket] Socket shutdown.");
-		FD_CLR(socket_, &fdSet_);
 		PRINT_DBUG("[spw_Connection::closeSocket] Socket removed from fdSet.");
 		closesocket( socket_ );
 		PRINT_DBUG("[spw_Connection::closeSocket] Socket closed.");
@@ -469,9 +470,9 @@ bool spw_Connection::process()
 	}
 	else if ( rc < 0 ) {
 		// Error - closed socket or something
-		PRINT_DBUG("[spw_Connection::process] SOCKET ERROR! %d", rc);
+		PRINT_DBUG("[spw_Connection::process] SOCKET ERROR! %d (%s)", rc, strerror(errno));
 		return false;
-	} else if (FD_ISSET(socket_, &fdSet)) {
+	} else if (socket_ != INVALID_SOCKET && FD_ISSET(socket_, &fdSet)) {
 		//PRINT_DBUG("[spw_Connection::process] PACKET REC !");
 		// Read Header
 		Request*	request = NULL;
