@@ -67,7 +67,7 @@ const uint8_t spw_Connection::TAG[] = { 83, 80, 65, 82, 82, 79, 87 };	// "SPARRO
 const uint8_t spw_Connection::SPARROW_API_VERSION = 1;
 
 spw_Connection::spw_Connection() : Thread("Listener"), 
-	lockSckt_(false, "socket lock"), lockRqst_(false, "requests lock"), lockAuth_(false, "authentication lock"), compressionAlgorithm_(0)
+	lockSckt_(false, "socket lock"), lockRqst_(false, "requests lock"), lockAuth_(false, "authentication lock"), compressionAlgorithm_(0), lstnThrdExcpt_(NULL)
 	//, connected_(false)
 {
 	socket_ = INVALID_SOCKET;
@@ -77,6 +77,7 @@ spw_Connection::spw_Connection() : Thread("Listener"),
 spw_Connection::~spw_Connection(void)
 {
 	disconnectAndResetRqsts( SparrowException( "shutdown" ), true );
+	resetLstnThrdExcpt();
 }
 
 // [PUBLIC] 
@@ -117,9 +118,19 @@ int spw_Connection::setProperties( const char* host, const char* user, const cha
 	return 0;
 }
 
-bool spw_Connection::isClosed() const
+bool spw_Connection::isClosed()
 {
 	Guard lockGuard( lockSckt_ );
+	if (!isRunning() && socket_ != INVALID_SOCKET) {
+		// The listening thread ran into an error and stopped. Reset the socket and connection state so that the user can try to connect again.
+		SparrowException	lstnThrdExcpt = this->lstnThrdExcpt_ != NULL ? *this->lstnThrdExcpt_ : SparrowException( "listening thread stopped due to an error" );
+		PRINT_DBUG("[spw_Connection::isClosed] Listening thread is not running. Last exception: %s. Resetting connection state.", lstnThrdExcpt.getText());
+		disconnectAndResetRqsts( lstnThrdExcpt, false );
+	} else if (isRunning() && socket_ == INVALID_SOCKET) {
+		// The listening thread is running but the socket is not open. This can only happen if the connection process failed before starting the listening thread, so reset the connection state so that the user can try to connect again.
+		PRINT_DBUG("[spw_Connection::isClosed] Listening thread is running but socket is not open. Resetting connection state.");
+		disconnectAndResetRqsts( SparrowException( "connection failed before starting listening thread" ), false );
+	}
 	return socket_ == INVALID_SOCKET;
 }
 
@@ -132,9 +143,19 @@ int spw_Connection::connect()
 		Guard			lockGuard( lockSckt_ );
 		PRINT_DBUG("[spw_Connection::connect] Starting connection procedure...");
 		if ( socket_ != INVALID_SOCKET ) {
-			PRINT_DBUG("[spw_Connection::connect] Socket is already connected, nothing to do...");
-			return 0;
+			if (!isRunning()) {
+				// The listening thread ran into an error and stopped. Reset the socket and connection state so that the user can try to connect again.
+				SparrowException	lstnThrdExcpt = this->lstnThrdExcpt_ != NULL ? *this->lstnThrdExcpt_ : SparrowException( "listening thread stopped due to an error" );
+				PRINT_DBUG("[spw_Connection::connect] Listening thread is not running. Last exception: %s. Resetting connection state.", lstnThrdExcpt.getText());
+				disconnectAndResetRqsts( lstnThrdExcpt, false );
+			} else {
+				// The socket is already connected and the listening thread is running, so nothing to do.
+				PRINT_DBUG("[spw_Connection::connect] Socket is already connected and listening thread is running, nothing to do...");
+				return 0;
+			}
 		}
+
+		resetLstnThrdExcpt();
 
 		try
 		{
@@ -460,83 +481,92 @@ bool spw_Connection::process()
 	tv.tv_sec = 1;
 	tv.tv_usec = 0;
 
-	// Wait for something to arrive on the socket_
-	//PRINT_DBUG("[spw_Connection::process] select ...");
-	int rc = select(static_cast<int>(maxSocket + 1), &fdSet, 0, 0, &tv);
-	//PRINT_DBUG("[spw_Connection::process] select %u", rc);
-	if ( rc == 0) {
-		//PRINT_DBUG("[spw_Connection::process] timeout");
-		return true;
-	}
-	else if ( rc < 0 ) {
-		// Error - closed socket or something
-		PRINT_DBUG("[spw_Connection::process] SOCKET ERROR! %d (%s)", rc, strerror(errno));
-		return false;
-	} else if (socket_ != INVALID_SOCKET && FD_ISSET(socket_, &fdSet)) {
-		//PRINT_DBUG("[spw_Connection::process] PACKET REC !");
-		// Read Header
-		Request*	request = NULL;
-		uint32_t	length, code, compressedLength;
-
-		try
+	try
+	{
+		// Wait for something to arrive on the socket_
+		//PRINT_DBUG("[spw_Connection::process] select ...");
+		int rc = select(static_cast<int>(maxSocket + 1), &fdSet, 0, 0, &tv);
+		//PRINT_DBUG("[spw_Connection::process] select %u", rc);
+		if ( rc == 0) {
+			//PRINT_DBUG("[spw_Connection::process] timeout");
+			return true;
+		}
+		else if ( rc < 0 )
 		{
-			{
-				uint8_t			header[24];
-				ByteBuffer		buffer(header, sizeof(header));
-				SocketReader	reader(socket_, buffer);
+			// Error - closed socket or something
+			PRINT_DBUG("[spw_Connection::process] SOCKET ERROR! %d (%s)", rc, strerror(errno));
+			throw SparrowException::create(false, SPW_API_FAILED, "Socket error: %d, %s", rc, strerror(errno));
+			//return false;
+		}
+		else if (socket_ != INVALID_SOCKET && FD_ISSET(socket_, &fdSet))
+		{
+			//PRINT_DBUG("[spw_Connection::process] PACKET REC !");
 
-				// Check tag.
-				for (uint32_t i = 0; i < sizeof(TAG); ++i) {
-					uint8_t check;
-					reader >> check;
-					if (check != TAG[i]) {
-						throw SparrowException::create(false, SPW_API_FAILED, "Malformed API response");
-					}
-				}
-				uint8_t version;
-				reader >> version;
-				if (version != SPARROW_API_VERSION) {
-					throw SparrowException::create(false, SPW_API_FAILED, "Unsupported API version: %u", static_cast<uint32_t>(version));
-				}
+			// Read packet
+			Request*	request = NULL;
+			uint32_t	length, code, compressedLength;
 
-				// Read request ID and find corresponding request object in our list
-				uint32_t			id;
-				reader >> id;
-				request = getRequest( id, true );
-				if ( request == NULL ) {
-					throw SparrowException::create(false, SPW_API_FAILED, "Received response for unknown request %u", id );
-				}
+			uint8_t			header[24];
+			ByteBuffer		buffer(header, sizeof(header));
+			SocketReader	reader(socket_, buffer);
 
-				reader >> length >> code >> compressedLength;
-				if (length > 100 * 1024 * 1024 || compressedLength > 100 * 1024 * 1024) {
-					const Str size(Str::fromSize(length));
-					throw SparrowException::create(false, SPW_API_FAILED, "Received too much data (%s)", size.c_str());
+			// Check tag.
+			for (uint32_t i = 0; i < sizeof(TAG); ++i) {
+				uint8_t check;
+				reader >> check;
+				if (check != TAG[i]) {
+					throw SparrowException::create(false, SPW_API_FAILED, "Malformed API response");
 				}
+			}
+			uint8_t version;
+			reader >> version;
+			if (version != SPARROW_API_VERSION) {
+				throw SparrowException::create(false, SPW_API_FAILED, "Unsupported API version: %u", static_cast<uint32_t>(version));
+			}
+
+			// Read request ID and find corresponding request object in our list
+			uint32_t			id;
+			reader >> id;
+			request = getRequest( id, true );
+			if ( request == NULL ) {
+				throw SparrowException::create(false, SPW_API_FAILED, "Received response for unknown request %u", id );
+			}
+
+			reader >> length >> code >> compressedLength;
+			if (length > 100 * 1024 * 1024 || compressedLength > 100 * 1024 * 1024) {
+				const Str size(Str::fromSize(length));
+				throw SparrowException::create(false, SPW_API_FAILED, "Received too much data (%s)", size.c_str());
 			}
 
 			// Read compressed request data.
-			try
+			// try
 			{
 				Response*			response = new Response( compressedLength, length, code );
 				SocketReader		reader( socket_, response->getBuffer() );	// Reads whatever data is currently available in socket input buffer
 				reader.advance( compressedLength );							// Reads data from socket up to compressedLength bytes, blocking if necessary
 				request->responseReceived( response );
-			} catch ( const SparrowException& e ) {
-				request->exceptionReceived( e );
-				throw;
 			}
+			// } catch ( const SparrowException& e ) {
+			// 	request->exceptionReceived( e );
+			// 	throw;
+			// }
 		}
-		catch ( const SparrowException& e )
+		else
 		{
-			stopping();
-			PRINT_ERR("An exception occurred (%s). Disconnecting.", e.getText());
-			disconnectAndResetRqsts( e, true );
-			return false;
+			// "stop" socket notification, so stop.
+			throw SparrowException::create(false, SPW_API_FAILED, "Stop notification received");
+			// stopping();
+			// PRINT_DBUG("[spw_Connection::process] STOP NOTIF!");
+			// resetRqsts( SparrowException::create(false, SPW_API_FAILED, "Stop notification received") );
+			// return false;
 		}
-	} else {
-		// "stop" socket notification, so stop.
+	}
+	catch ( const SparrowException& e )
+	{
 		stopping();
-		PRINT_DBUG("[spw_Connection::process] STOP NOTIF!");
+		PRINT_ERR("An exception occurred (%s). Disconnecting.", e.getText());
+		//disconnectAndResetRqsts( e, true );
+		resetRqsts( e );
 		return false;
 	}
 
@@ -546,8 +576,13 @@ bool spw_Connection::process()
 
 
 // [PUBLIC] 
-void spw_Connection::initialize( const spw_Table& table ) _THROW_(SparrowException)
+int spw_Connection::initialize( const spw_Table& table ) _THROW_(SparrowException)
 {
+	if ( isClosed() ) {
+		spwerror = SparrowException( "Not connected.", true, SPW_API_SOCKET_CONN_CLOSED );
+		return SPW_API_SOCKET_CONN_CLOSED;
+	}
+
 	// Downcast to spw_Table type
 	//const spw_Table& table = *(static_cast<const spw_Table*>(&tbl));
 
@@ -592,6 +627,8 @@ void spw_Connection::initialize( const spw_Table& table ) _THROW_(SparrowExcepti
 
 	RequestGuard	request = compressAndSendBuffer( INIT, buffer );
 	request->getResponse();
+
+	return 0;
 }
 
 // [PUBLIC] 

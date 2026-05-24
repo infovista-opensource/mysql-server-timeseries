@@ -192,6 +192,7 @@ private:
 	my_socket			socket_;
 	spw_ConnectionProperties	properties_;
 	uint32_t		compressionAlgorithm_;
+	SparrowException*	lstnThrdExcpt_;
 
 	// Listening thread
 	fd_set		fdSet_;
@@ -218,6 +219,13 @@ private:
 	void disconnectAndResetRqsts(const SparrowException&, bool lock);
 	void closeSocket(bool lock);
 
+	void resetLstnThrdExcpt() {
+		if (lstnThrdExcpt_ != NULL) {
+			delete lstnThrdExcpt_;
+			lstnThrdExcpt_ = NULL;
+		}
+	}
+
 protected:
 
 	bool process() override;
@@ -230,7 +238,7 @@ protected:
 		return false;
 	}
 
-	void initialize(const spw_Table&) _THROW_(SparrowException);
+	int initialize(const spw_Table&) _THROW_(SparrowException);
 
 
 public:
@@ -246,7 +254,7 @@ public:
 	int connect() override;
 	void disconnect() override;
 
-	bool isClosed() const override;
+	bool isClosed() override;
 	
 	// bool isConnected() const override {
 	// 	Guard lockGuard( lockAuth_ );
