@@ -537,33 +537,21 @@ bool spw_Connection::process()
 			}
 
 			// Read compressed request data.
-			// try
-			{
-				Response*			response = new Response( compressedLength, length, code );
-				SocketReader		reader( socket_, response->getBuffer() );	// Reads whatever data is currently available in socket input buffer
-				reader.advance( compressedLength );							// Reads data from socket up to compressedLength bytes, blocking if necessary
-				request->responseReceived( response );
-			}
-			// } catch ( const SparrowException& e ) {
-			// 	request->exceptionReceived( e );
-			// 	throw;
-			// }
+			Response*			response = new Response( compressedLength, length, code );
+			SocketReader		reader( socket_, response->getBuffer() );	// Reads whatever data is currently available in socket input buffer
+			reader.advance( compressedLength );							// Reads data from socket up to compressedLength bytes, blocking if necessary
+			request->responseReceived( response );
 		}
 		else
 		{
 			// "stop" socket notification, so stop.
 			throw SparrowException::create(false, SPW_API_FAILED, "Stop notification received");
-			// stopping();
-			// PRINT_DBUG("[spw_Connection::process] STOP NOTIF!");
-			// resetRqsts( SparrowException::create(false, SPW_API_FAILED, "Stop notification received") );
-			// return false;
 		}
 	}
 	catch ( const SparrowException& e )
 	{
 		stopping();
 		PRINT_ERR("An exception occurred (%s). Disconnecting.", e.getText());
-		//disconnectAndResetRqsts( e, true );
 		resetRqsts( e );
 		return false;
 	}
