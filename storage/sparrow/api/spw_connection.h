@@ -197,9 +197,6 @@ private:
 	// Listening thread
 	fd_set		fdSet_;
 
-	// Internal state of the connection
-	//bool		connected_;
-
 	// Array of currently active requests
 	SYSslist<RequestGuard>	requests_;
 	RequestGuard getRequest(uint32_t id, bool remove);
@@ -256,17 +253,6 @@ public:
 
 	bool isClosed() override;
 	
-	// bool isConnected() const override {
-	// 	Guard lockGuard( lockAuth_ );
-	// 	return connected_;
-	// }
-
-	// void setConnected(bool connected) {
-	// 	Guard lockGuard( lockAuth_ );
-	// 	connected_ = connected;
-	// }
-
-
 	Table* createTable() const override;
 	Table* getTable(const char* database, const char* table) override;
 	void releaseTable(const Table*) const override;

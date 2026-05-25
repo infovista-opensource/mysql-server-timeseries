@@ -68,7 +68,6 @@ const uint8_t spw_Connection::SPARROW_API_VERSION = 1;
 
 spw_Connection::spw_Connection() : Thread("Listener"), 
 	lockSckt_(false, "socket lock"), lockRqst_(false, "requests lock"), lockAuth_(false, "authentication lock"), compressionAlgorithm_(0), lstnThrdExcpt_(NULL)
-	//, connected_(false)
 {
 	socket_ = INVALID_SOCKET;
 	counter_ = 0;
@@ -247,7 +246,6 @@ void spw_Connection::closeSocket( bool doLock )
 
 	if ( socket_ != INVALID_SOCKET ) {
 		PRINT_DBUG("[spw_Connection::closeSocket] Resetting fdSet.");
-//		FD_CLR(socket_, &fdSet_);
 		FD_ZERO(&fdSet_);
 		PRINT_DBUG("[spw_Connection::closeSocket] Shutting down socket...");
 		::shutdown(socket_, SHUT_RDWR);
