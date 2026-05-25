@@ -535,11 +535,13 @@ bool spw_Connection::process()
 				throw SparrowException::create(false, SPW_API_FAILED, "Received too much data (%s)", size.c_str());
 			}
 
-			// Read compressed request data.
-			Response*			response = new Response( compressedLength, length, code );
-			SocketReader		reader( socket_, response->getBuffer() );	// Reads whatever data is currently available in socket input buffer
-			reader.advance( compressedLength );							// Reads data from socket up to compressedLength bytes, blocking if necessary
-			request->responseReceived( response );
+			{
+				// Read compressed request data.
+				Response*			response = new Response( compressedLength, length, code );
+				SocketReader		reader( socket_, response->getBuffer() );	// Reads whatever data is currently available in socket input buffer
+				reader.advance( compressedLength );							// Reads data from socket up to compressedLength bytes, blocking if necessary
+				request->responseReceived( response );
+			}
 		}
 		else
 		{

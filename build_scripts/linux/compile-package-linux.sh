@@ -371,6 +371,11 @@ fi		# if not pack only
 
 export PACKAGE_DIR=`ls -l $build_dir_arch/_CPack_Packages/Linux/TGZ | grep mysql- | head -n1 | awk '{print $NF}'`
 
+if [ ! -d "$build_dir_arch/_CPack_Packages/Linux/TGZ/$PACKAGE_DIR" ]; then
+	echo `date +"%x %X"` "Error: package folder $PACKAGE_DIR does not exist in $build_dir_arch/_CPack_Packages/Linux/TGZ"
+	exit 1
+fi
+
 export MYSQL_TAG=`echo $PACKAGE_DIR | sed -e 's/mysql-\([0-9.]*\)-.*/\1/'`
 echo `date +"%x %X"` "MySQL tag is $MYSQL_TAG"
 
