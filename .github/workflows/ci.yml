@@ -4,9 +4,6 @@ on:
   push:
     tags:
         - '[0-9]+.[0-9]+.[0-9]+**'
-  release:
-    types: [created, published]
-  workflow_dispatch:
 
 # Only Releases will have their assets published. Tags won't. 
 
@@ -45,7 +42,8 @@ jobs:
             **/*.log
       
       - name: Uploading release assets
-        if: github.event_name == 'release'
+        # Does not work. Triggered on tag push, but github.event_name is "push", not "release".
+        # if: github.event_name == 'release'
         uses: alexellis/upload-assets@0.4.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -82,7 +80,8 @@ jobs:
             **/*.log
       
       - name: Uploading release assets
-        if: github.event_name == 'release'
+        # Does not work. Triggered on tag push, but github.event_name is "push", not "release".
+        # if: github.event_name == 'release'
         uses: alexellis/upload-assets@0.4.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
