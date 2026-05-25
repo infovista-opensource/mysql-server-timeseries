@@ -195,30 +195,41 @@ class Guard {
 private:
 
 	Lock* lock_;
-	bool acquired_;
+	bool active_;
 
 public:
 
-	Guard(Lock& lock, const bool doTry = false) : lock_(&lock) {
-		if (doTry) {
-			acquired_ = lock_->tryLock();
-		} else {
+	Guard(Lock& lock, bool active=true) : lock_(&lock) {
+		if (active) {
 			lock_->lock();
-			acquired_ = true;
+			active_ = true;
+		} else {
+			active_ = false;
 		}
 	}
 
-	Guard() : lock_(0), acquired_(false) {
+	Guard() : lock_(0), active_(false) {
 	}
 
 	~Guard() {
-		if (acquired_ && lock_ != 0) {
+		if (active_ && lock_ != 0) {
 			lock_->unlock();
 		}
 	}
 
+	void release() {
+		if (active_ && lock_ != 0) {
+			lock_->unlock();
+			active_ = false;
+		}
+	}	
+
+	void disable() {
+		active_ = false;
+	}	
+
 	bool isAcquired() const {
-		return acquired_;
+		return active_;
 	}
 
 private:
@@ -227,7 +238,7 @@ private:
 	Guard(const Guard&);
 };
 
-
+#if 0	// These types of lock guards are not actually used anywhere.
 // Read lock guard.
 class ReadGuard {
 private:
@@ -306,7 +317,7 @@ private:
 	WriteGuard& operator = (const WriteGuard&);
 	WriteGuard(const WriteGuard&);
 };
-
+#endif
 
 }
 

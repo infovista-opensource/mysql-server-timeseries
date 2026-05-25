@@ -181,15 +181,18 @@ private:
 	static const uint8_t SPARROW_API_VERSION;
 
 	// Protect access to the socket, fdSet_ , properties_ and the listening thread
-	Lock		lockSckt_;
+	mutable Lock		lockSckt_;
 
 	// Protect access to the request list, requests_
 	Lock		lockRqst_;
+
+	Lock		lockAuth_;	// Protects the authentication process (only one thread can authenticate at a time)
 
 	// Socket to communicate with Sparrow
 	my_socket			socket_;
 	spw_ConnectionProperties	properties_;
 	uint32_t		compressionAlgorithm_;
+	SparrowException*	lstnThrdExcpt_;
 
 	// Listening thread
 	fd_set		fdSet_;
@@ -198,7 +201,6 @@ private:
 	SYSslist<RequestGuard>	requests_;
 	RequestGuard getRequest(uint32_t id, bool remove);
 
-
 	// Request counter (used to generate Request::id_)
 	uint32_t		counter_;
 
@@ -206,13 +208,20 @@ private:
 	void resetRqsts(const SparrowException& e);
 
 	void sendHeader(SocketWriter& writer, uint32_t rqstId, uint32_t len, uint32_t comprLen, Action action);
-	RequestGuard compressAndSendBuffer(Action action, const ByteBuffer& buffer);
-	RequestGuard compressAndSendBuffer(Action action, const BufferList& buffer);
+	RequestGuard compressAndSendBuffer(Action action, const ByteBuffer& buffer, bool lock=true);
+	RequestGuard compressAndSendBuffer(Action action, const BufferList& buffer, bool lock=true);
 
 	RequestGuard authenticate() _THROW_(SparrowException);
 
 	void disconnectAndResetRqsts(const SparrowException&, bool lock);
 	void closeSocket(bool lock);
+
+	void resetLstnThrdExcpt() {
+		if (lstnThrdExcpt_ != NULL) {
+			delete lstnThrdExcpt_;
+			lstnThrdExcpt_ = NULL;
+		}
+	}
 
 protected:
 
@@ -226,7 +235,7 @@ protected:
 		return false;
 	}
 
-	void initialize(const spw_Table&) _THROW_(SparrowException);
+	int initialize(const spw_Table&) _THROW_(SparrowException);
 
 
 public:
@@ -242,8 +251,8 @@ public:
 	int connect() override;
 	void disconnect() override;
 
-	bool isClosed() const override;
-
+	bool isClosed() override;
+	
 	Table* createTable() const override;
 	Table* getTable(const char* database, const char* table) override;
 	void releaseTable(const Table*) const override;

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Arg 1: Build type: release or debug. Default is release
-# Arg 3: What to do. If set "extract_only", then the source code is downloaded and extracted, but the build is not launched.
+# Arg 2: What to do. If set "extract_only", then the source code is downloaded and extracted, but the build is not launched.
 #       If set to "do_not_build", the build process will go one step further. It will download the conan packages and execute cmake.
 #       If not set ot left empty, the build process will execute completely. That's the default.
 
@@ -34,7 +34,7 @@ OPTIONS=$2
 # echo "EXTRACT_ONLY is $EXTRACT_ONLY"
 
 if [ -z "$CI_COMMIT_TAG" ]; then
-    echo "Env variable CI_COMMIT_TAG is empty or not defined. It must be set to a valid tag values, such as 4.2.123 or 4.2.123-spw-287."
+    echo "Env variable CI_COMMIT_TAG is empty or not defined. It must be set to a valid tag values, such as 8.4.4-b or 8.4.4-spw-287."
     exit 1
 fi
 

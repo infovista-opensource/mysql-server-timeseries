@@ -2,6 +2,9 @@
 	Socket utilities.
 */
 
+#include <iostream>
+#include <sstream>
+
 #include "socketutil.h"
 #include "../functions/ipaddress.h"
 
@@ -56,15 +59,20 @@ my_socket SocketUtil::create(int type, const SocketAddress& src_addr)
 	// Create socket.
 	my_socket socketId = socket(src_addr.isV6() ? AF_INET6 : AF_INET, type, 0);
 	if (socketId == INVALID_SOCKET) {
-		throw SparrowException::create(true, SPW_API_FAILED, "Cannot create socket");
+		std::ostringstream 	msg;
+		msg << "Cannot create socket: " << strerror(getLastError());
+		throw SparrowException::create(true, SPW_API_FAILED, "%s", msg.str().c_str());
 	}
 
-	int dummy = 1;
-	setsockopt(socketId, SOL_SOCKET, SO_REUSEADDR, (char*)&dummy, sizeof(dummy));
+	// Allow address reuse
+	int opt = 1;
+	setsockopt(socketId, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
 
 	if (bind(socketId, src_addr.getSockAddr(), src_addr.getSockAddrLength()) != 0) {
+		std::ostringstream 	msg;
+		msg << "Cannot bind socket to address " << src_addr.print().c_str() << ": " << strerror(getLastError());
 		closesocket(socketId);
-		throw SparrowException::create(true, SPW_API_FAILED, "Cannot bind socket to address %s", src_addr.print().c_str());
+		throw SparrowException::create(true, SPW_API_FAILED, "%s", msg.str().c_str());
 	}
 
 	return socketId;
@@ -73,25 +81,14 @@ my_socket SocketUtil::create(int type, const SocketAddress& src_addr)
 my_socket SocketUtil::createAndConnect(int type, const SocketAddress& target_addr, const SocketAddress& src_addr) 
 	_THROW_(SparrowException) {
 	// Create socket.
-	my_socket socketId = socket(target_addr.isV6() ? AF_INET6 : AF_INET, type, 0);
-	if (socketId == INVALID_SOCKET) {
-		throw SparrowException::create(true, SPW_API_FAILED, "Cannot create socket");
-	}
-
-	int dummy = 1;
-	setsockopt(socketId, SOL_SOCKET, SO_REUSEADDR, (char*)&dummy, sizeof(dummy));
-
-	if (bind(socketId, src_addr.getSockAddr(), src_addr.getSockAddrLength()) != 0) {
-		int		error = getLastError();
-		closesocket(socketId);
-		throw SparrowException::create(true, SPW_API_FAILED, "Cannot bind socket to address %s: %d", src_addr.print().c_str(), error);
-	}
+	my_socket socketId = SocketUtil::create(type, src_addr);
 
 	// Connect to Sparrow.
 	if ( connect( socketId, target_addr.getSockAddr(), target_addr.getSockAddrLength() ) != 0 ) {
-		int		error = getLastError();
+		std::ostringstream 	msg;
+		msg << "Cannot connect socket to address " << target_addr.print().c_str() << ": " << strerror(getLastError());
 		closesocket(socketId);
-		throw SparrowException::create(true, SPW_API_FAILED, "Cannot connect socket to address %s: %d", target_addr.print().c_str(), error);
+		throw SparrowException::create(true, SPW_API_FAILED, "%s", msg.str().c_str());
 	}
 
 	return socketId;

@@ -105,7 +105,7 @@ public:
 	virtual void disconnect() = 0;
 
 	// Returns true if the connection to the Sparrow engine is established
-	virtual bool isClosed() const = 0;
+	virtual bool isClosed() = 0;
 
 	// Creates an empty Table object
 	virtual Table* createTable() const = 0;

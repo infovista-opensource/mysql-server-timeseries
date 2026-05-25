@@ -2,6 +2,8 @@
 #define _spw_api_assert_h
 
 #include <stdlib.h>
+#include <thread>
+#include <functional>
 
 #include "my_compiler.h"
 
@@ -20,6 +22,11 @@ inline void spwAssertionFailure (const char* expr, const char* filename, int lin
 	abort();
 }
 
+inline unsigned long long spwCurrentThreadId()
+{
+	return static_cast<unsigned long long>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+}
+
 #define _SPW_ASSERT(a) do { if ((a) == 0) spwAssertionFailure (#a, __FILE__, __LINE__); } while (0)
 
 void PRINT_DBUG(const char* format, ...) MY_ATTRIBUTE((format(printf, 1, 2)));
@@ -30,7 +37,7 @@ void PRINT_ERR(const char* format, ...) MY_ATTRIBUTE((format(printf, 1, 2)));
 inline void PRINT_WARN(const char* format, ...) {
 	va_list args;
 	va_start(args, format);
-	fprintf(stdout, "warn: ");
+	fprintf(stdout, "warn[0x%llx]: ", spwCurrentThreadId());
 	vfprintf(stdout, format, args);
 	fprintf(stdout, "\n");
 	va_end(args);
@@ -39,7 +46,7 @@ inline void PRINT_WARN(const char* format, ...) {
 inline void PRINT_ERR(const char* format, ...) {
 	va_list args;
 	va_start(args, format);
-	fprintf(stdout, "error: ");
+	fprintf(stdout, "error[0x%llx]: ", spwCurrentThreadId());
 	vfprintf(stdout, format, args);
 	fprintf(stdout, "\n");
 	va_end(args);
@@ -47,18 +54,25 @@ inline void PRINT_ERR(const char* format, ...) {
 
 #ifdef NDEBUG
 
-#define PRINT_DBUG(...)
-#define PRINT_INFO(...)
+// #define PRINT_DBUG(...)
+// #define PRINT_INFO(...)
 #define SPW_ASSERT(a)
 #define SPW_dbgASSERT(a)
 #define SPW_relASSERT(a) _SPW_ASSERT(a)
 
 #else
 
+#define SPW_ASSERT(a) _SPW_ASSERT(a)
+#define SPW_dbgASSERT(a) _SPW_ASSERT(a)
+#define SPW_relASSERT(a) _SPW_ASSERT(a)
+
+#endif
+
 inline void PRINT_DBUG(const char* format, ...) {
 	va_list args;
 	va_start(args, format);
-	fprintf(stdout, "debug: ");
+	
+	fprintf(stdout, "debug[0x%llx]: ", spwCurrentThreadId());
 	vfprintf(stdout, format, args);
 	fprintf(stdout, "\n");
 	va_end(args);
@@ -67,17 +81,12 @@ inline void PRINT_DBUG(const char* format, ...) {
 inline void PRINT_INFO(const char* format, ...) {
 	va_list args;
 	va_start(args, format);
-	fprintf(stdout, "info: ");
+	fprintf(stdout, "info[0x%llx]: ", spwCurrentThreadId());
 	vfprintf(stdout, format, args);
 	fprintf(stdout, "\n");
 	va_end(args);
 }
 
-#define SPW_ASSERT(a) _SPW_ASSERT(a)
-#define SPW_dbgASSERT(a) _SPW_ASSERT(a)
-#define SPW_relASSERT(a) _SPW_ASSERT(a)
-
-#endif
 
 
 #endif		// _spw_api_assert_h
