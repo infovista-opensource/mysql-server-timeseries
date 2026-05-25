@@ -494,7 +494,6 @@ bool spw_Connection::process()
 			// Error - closed socket or something
 			PRINT_DBUG("[spw_Connection::process] SOCKET ERROR! %d (%s)", rc, strerror(errno));
 			throw SparrowException::create(false, SPW_API_FAILED, "Socket error: %d, %s", rc, strerror(errno));
-			//return false;
 		}
 		else if (socket_ != INVALID_SOCKET && FD_ISSET(socket_, &fdSet))
 		{
