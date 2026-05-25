@@ -48,7 +48,6 @@ public:
 	bool start() {
 		my_thread_attr_t attr;
 		my_thread_attr_init(&attr);
-		//my_thread_attr_setdetachstate(&attr, MY_THREAD_CREATE_DETACHED);
 		my_thread_attr_setstacksize(&attr, 262144);
 		Guard guard(lock_);
 		PRINT_DBUG("[thread] Starting %s", m_name_ != nullptr ? m_name_ : "unknown");

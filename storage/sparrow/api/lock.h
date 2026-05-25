@@ -199,15 +199,6 @@ private:
 
 public:
 
-	/*Guard(Lock& lock, const bool doTry = false) : lock_(&lock) {
-		if (doTry) {
-			acquired_ = lock_->tryLock();
-		} else {
-			lock_->lock();
-			acquired_ = true;
-		}
-	}*/
-
 	Guard(Lock& lock, bool active=true) : lock_(&lock) {
 		if (active) {
 			lock_->lock();
