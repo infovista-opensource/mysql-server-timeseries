@@ -150,7 +150,7 @@ static SHOW_VAR sparrow_status_variables[]= {
 	{ "tasks_pending_flush_tasks", (char*) &sparrowStatus.tasksPendingFlushTasks_, SHOW_INT, SHOW_SCOPE_GLOBAL },
 	{ "tasks_pending_flush_alltasks", (char*) &sparrowStatus.tasksPendingFlushAllTasks_, SHOW_INT, SHOW_SCOPE_GLOBAL },
 	{ "tasks_pending_flush_jobs", (char*) &sparrowStatus.tasksPendingFlushJobs_, SHOW_INT, SHOW_SCOPE_GLOBAL },
-	{ "tasks_pending_flush_string_jobs", (char*) &sparrowStatus.tasksPendingFlushJobs_, SHOW_INT, SHOW_SCOPE_GLOBAL },
+	{ "tasks_pending_flush_string_jobs", (char*) &sparrowStatus.tasksPendingStringJobs_, SHOW_INT, SHOW_SCOPE_GLOBAL },
 	{ "tasks_pending_flush_index_jobs", (char*) &sparrowStatus.tasksPendingIndexJobs_, SHOW_INT, SHOW_SCOPE_GLOBAL },
 	{ "tasks_pending_flush_write_jobs", (char*) &sparrowStatus.tasksPendingWriteJobs_, SHOW_INT, SHOW_SCOPE_GLOBAL },
 	{ "tasks_pending_coalescing_maintasks", (char*) &sparrowStatus.tasksPendingCoalescingMainTasks_, SHOW_INT, SHOW_SCOPE_GLOBAL },
