@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2009, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -653,6 +653,8 @@ static struct view {
      "SELECT * "
      "FROM `ndbinfo`.`ndb$threads`"},
     {"ndbinfo", "threadstat", "SELECT * FROM `ndbinfo`.`ndb$threadstat`"},
+    {"ndbinfo", "transporter_activity",
+     "SELECT * FROM `ndbinfo`.`ndb$transporter_activity`"},
     {"ndbinfo", "transporter_details",
      "SELECT node_id, block_instance, trp_id, remote_node_id, "
      " CASE connection_status"
@@ -671,7 +673,9 @@ static struct view {
      "   WHEN 1 THEN \"TCP\""
      "   WHEN 3 THEN \"SHM\""
      "   ELSE NULL "
-     " END AS type "
+     " END AS type, "
+     " heartbeat_interval, "
+     " last_recv "
      "FROM `ndbinfo`.`ndb$transporter_details`"},
     {"ndbinfo", "transporters",
      "SELECT node_id, remote_node_id, "
@@ -751,7 +755,9 @@ static struct lookup {
         "single_user_mode enum('locked','read_only','read_write') NOT NULL, "
         "force_var_part INT UNSIGNED NOT NULL, "
         "GCI_bits INT UNSIGNED NOT NULL, "
-        "author_bits INT UNSIGNED NOT NULL",
+        "author_bits INT UNSIGNED NOT NULL, "
+        "extra_metadata_version enum('FRM', 'SDI'), "
+        "extra_metadata LONGBLOB",
     },
     {"ndbinfo", "events",
      "event_id INT UNSIGNED NOT NULL PRIMARY KEY, "

@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2026, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -4423,6 +4423,13 @@ static bool build_equal_items_for_cond(THD *thd, Item *cond, Item **retcond,
     }
 
     if (do_inherit) {
+      // Range optimizer expects the LHS of an IN predicate to be columns
+      // from a table. Doing constant propagation for these columns would
+      // skip the range analysis leading to less performant queries.
+      // So we disable constant propagation for this case.
+      if (is_function_of_type(cond, Item_func::IN_FUNC)) {
+        down_cast<Item_func_in *>(cond)->set_no_constant_propagation();
+      }
       /*
         For each field reference in cond, not from equal item predicates,
         set a pointer to the multiple equality it belongs to (if there is any)
@@ -5630,6 +5637,31 @@ bool JOIN::propagate_dependencies() {
 }
 
 /**
+ * Check if a table can be safely marked as const during optimization.
+ *
+ * For regular base tables, always safe.
+ * For views and derived tables:
+ *   - If merged: check if it has stored programs in EXPLAIN mode
+ *   - If materialized: delegates to materializable_is_const() which checks
+ *     estimated row count, optimization flags, and stored programs in EXPLAIN
+ *
+ * @param thd   Thread handler
+ * @param tr    Table reference to check
+ * @return true if safe to mark as const, false otherwise
+ */
+static inline bool is_const_optimizable(THD *thd, Table_ref *tr) {
+  if (!tr->is_view_or_derived()) return true;
+
+  // For merged views/derived tables, check EXPLAIN mode + stored programs
+  if (!tr->uses_materialization()) {
+    return !(thd->lex->is_explain() && tr->has_stored_program());
+  }
+
+  // For materialized derived tables, use the comprehensive check
+  return tr->materializable_is_const(thd);
+}
+
+/**
   Extract const tables based on row counts.
 
   @returns false if success, true if error
@@ -5686,7 +5718,7 @@ bool JOIN::extract_const_tables() {
       case extract_empty_table:
         // Extract tables with zero rows, but only if statistics are exact
         if ((table->file->stats.records == 0 || all_partitions_pruned_away) &&
-            (table->file->ha_table_flags() & HA_STATS_RECORDS_IS_EXACT))
+            (table->file->ha_table_flags() & HA_STATS_RECORDS_IS_EXACT) != 0u)
           mark_const_table(tab, nullptr);
         break;
 
@@ -5695,13 +5727,18 @@ bool JOIN::extract_const_tables() {
           Extract tables with zero or one rows, but do not extract tables that
            1. are dependent upon other tables, or
            2. have no exact statistics, or
-           3. are full-text searched
+           3. are full-text searched, or
+           4. a derived table that cannot be safely treated as const
+              (e.g., materialized table with >1 row, or with stored programs
+              in EXPLAIN mode)
         */
         if ((table->s->system || table->file->stats.records <= 1 ||
              all_partitions_pruned_away) &&
-            !tab->dependent &&                                              // 1
-            (table->file->ha_table_flags() & HA_STATS_RECORDS_IS_EXACT) &&  // 2
-            !tl->is_fulltext_searched())                                    // 3
+            !tab->dependent &&  // 1
+            (table->file->ha_table_flags() & HA_STATS_RECORDS_IS_EXACT) !=
+                0u &&                       // 2
+            !tl->is_fulltext_searched() &&  // 3
+            is_const_optimizable(thd, tl))  // 4
           mark_const_table(tab, nullptr);
         break;
     }
@@ -5806,12 +5843,15 @@ bool JOIN::extract_func_dependent_tables() {
               has a real row or a null-extended row in the optimizer phase.
               We have no possibility to evaluate its join condition at
               execution time, when it is marked as a system table.
+           4. a derived table that can be safely treated as const
         */
         if (table->file->stats.records <= 1L &&                             // 1
             (table->file->ha_table_flags() & HA_STATS_RECORDS_IS_EXACT) &&  // 1
             !tl->outer_join_nest() &&                                       // 2
-            !(tab->join_cond() && tab->join_cond()->cost().IsExpensive()))  // 3
-        {  // system table
+            !(tab->join_cond() != nullptr &&
+              tab->join_cond()->cost().IsExpensive()) &&  // 3
+            is_const_optimizable(thd, tl))                // 4
+        {                                                 // system table
           mark_const_table(tab, nullptr);
           const int status =
               join_read_const_table(tab, positions + const_tables - 1);
@@ -5850,20 +5890,27 @@ bool JOIN::extract_func_dependent_tables() {
              1. are full-text searched, or
              2. are part of nested outer join, or
              3. are part of semi-join, or
-             4. have an expensive outer join condition.
-             5. are blocked by handler for const table optimize.
+             4. have an expensive outer join condition, or
+             5. are blocked by handler for const table optimize, or
              6. are not going to be used, typically because they are streamed
                 instead of materialized
-                (see Query_expression::can_materialize_directly_into_result()).
+                (see Query_expression::can_materialize_directly_into_result()),
+            or
+             7. key evaluated in stored program in EXPLAIN mode, or
+             8. a derived table that cannot be safely treated as const
           */
+
           if (eq_part.is_prefix(table->key_info[key].user_defined_key_parts) &&
               !tl->is_fulltext_searched() &&                            // 1
               !tl->outer_join_nest() &&                                 // 2
               !(tl->embedding && tl->embedding->is_sj_or_aj_nest()) &&  // 3
-              !(tab->join_cond() &&
+              !(tab->join_cond() != nullptr &&
                 tab->join_cond()->cost().IsExpensive()) &&                // 4
               !(table->file->ha_table_flags() & HA_BLOCK_CONST_TABLE) &&  // 5
-              table->is_created()) {                                      // 6
+              table->is_created() &&                                      // 6
+              !(thd->lex->is_explain() &&
+                start_keyuse->val->has_stored_program()) &&  // 7
+              is_const_optimizable(thd, tl)) {               // 8
             if (table->key_info[key].flags & HA_NOSAME) {
               if (const_ref == eq_part) {  // Found everything for ref.
                 ref_changed = true;
@@ -6275,15 +6322,26 @@ static ha_rows get_quick_record_count(THD *thd, JOIN_TAB *tab, ha_rows limit,
 
   // Derived tables aren't filled yet, so no stats are available.
   if (!tl->uses_materialization()) {
+    table_map prev_tables = 0;
+    table_map read_tables = 0;
+    if (JOIN *join = tab->join(); join != nullptr) {
+      table_map const_tables = join->found_const_table_map;
+      // Const tables are always available before any non‑const table.
+      prev_tables = const_tables;
+      // During execution we can read from all previously joined tables; in
+      // the optimization phase only const tables have been read.
+      read_tables = join->is_executed()
+                        ? (tab->prefix_tables() & ~tab->added_tables())
+                        : const_tables;
+    }
     AccessPath *range_scan;
     Key_map keys_to_use = tab->const_keys;
     keys_to_use.merge(tab->skip_scan_keys);
     MEM_ROOT temp_mem_root(key_memory_test_quick_select_exec,
                            thd->variables.range_alloc_block_size);
     const int error = test_quick_select(
-        thd, thd->mem_root, &temp_mem_root, keys_to_use, 0,
-        0,  // empty table_map
-        limit,
+        thd, thd->mem_root, &temp_mem_root, keys_to_use, prev_tables,
+        read_tables, limit,
         false,  // don't force quick range
         ORDER_NOT_RELEVANT, tab->table(), tab->skip_records_in_range(),
         condition, &tab->needed_reg, tab->table()->force_index,
@@ -6296,7 +6354,7 @@ static ha_rows get_quick_record_count(THD *thd, JOIN_TAB *tab, ha_rows limit,
       return 0;
     }
     DBUG_PRINT("warning", ("Couldn't use record count on const keypart"));
-  } else if (tl->is_table_function() || tl->materializable_is_const()) {
+  } else if (tl->is_table_function() || tl->materializable_is_const(thd)) {
     tl->fetch_number_of_rows();
     return tl->table->file->stats.records;
   }
@@ -7806,23 +7864,51 @@ bool add_key_fields(THD *thd, JOIN *join, Key_field **key_fields,
   return false;
 }
 
-/*
-  Add all keys with uses 'field' for some keypart
-  If field->and_level != and_level then only mark key_part as const_part
+/**
+  Add a Key_use entry for a given Key_field.
 
-  RETURN
-   0 - OK
-   1 - Out of memory.
+  @param keyuse_array          Destination array for general keyuses used in
+                               access method selection and range analysis.
+  @param key_field             Key_field describing the equality predicate.
+  @param primary_keyuse_array  Optional separate array that will receive
+                               Key_use entries for the primary key even when
+                               that key is not in keys_in_use_for_query.
+
+  The optimizer normally ignores keys that are masked out by
+  TABLE::keys_in_use_for_query when populating @c keyuse_array. However,
+  some consumers (notably test_if_order_by_key()) rely on
+  TABLE::const_key_parts[] to understand which key parts are constant, even
+  if the primary key itself is not considered as a candidate access method
+  (for example because an INDEX hint forced a secondary index).
+
+  To support such cases without changing access method selection semantics,
+  this function optionally records primary key keyuses into
+  @c primary_keyuse_array when the primary key is not in
+  keys_in_use_for_query. The caller may then derive const_key_parts from
+  those keyuses while keeping the primary key excluded from access planning.
 */
-
-static bool add_key_part(Key_use_array *keyuse_array, Key_field *key_field) {
+static bool add_key_part(Key_use_array *keyuse_array, Key_field *key_field,
+                         Key_use_array *primary_keyuse_array = nullptr) {
   if (key_field->eq_func && !(key_field->optimize & KEY_OPTIMIZE_EXISTS)) {
     const Field *const field = key_field->item_field->field;
     Table_ref *const tl = key_field->item_field->table_ref;
     TABLE *const table = tl->table;
 
+    Key_use_array *cur_keyuse_array = keyuse_array;
     for (uint key = 0; key < table->s->keys; key++) {
-      if (!(table->keys_in_use_for_query.is_set(key))) continue;
+      cur_keyuse_array = keyuse_array;
+      if (!(table->keys_in_use_for_query.is_set(key))) {
+        /*
+          When primary_keyuse_array is provided, record Key_use entries for
+          the primary key there even if keys_in_use_for_query masks it out.
+          All other keys remain filtered purely by keys_in_use_for_query.
+        */
+        if (key == table->s->primary_key && primary_keyuse_array != nullptr) {
+          cur_keyuse_array = primary_keyuse_array;
+        } else {
+          continue;
+        }
+      }
       if (table->key_info[key].flags & (HA_FULLTEXT | HA_SPATIAL))
         continue;  // ToDo: ft-keys in non-ft queries.   SerG
 
@@ -7836,7 +7922,7 @@ static bool add_key_part(Key_use_array *keyuse_array, Key_field *key_field) {
                                ~(ha_rows)0,  // will be set in optimize_keyuse
                                key_field->null_rejecting, key_field->cond_guard,
                                key_field->sj_pred_no);
-          if (keyuse_array->push_back(keyuse))
+          if (cur_keyuse_array->push_back(keyuse))
             return true; /* purecov: inspected */
         }
       }
@@ -8369,6 +8455,11 @@ static bool update_ref_and_keys(THD *thd, Key_use_array *keyuse,
     return true; /* purecov: inspected */
   and_level = 0;
   field = end = key_fields;
+  // Used to collect primary-key Key_use entries even when the primary key is
+  // not in TABLE::keys_in_use_for_query (e.g. due to an INDEX hint). These
+  // are later converted to TABLE::const_key_parts so ORDER BY/GROUP BY
+  // optimization can still reason about primary-key suffixes for sorting.
+  Key_use_array primary_keyuses(thd->mem_root);
   *sargables = (SARGABLE_PARAM *)key_fields +
                (sz - sizeof((*sargables)[0].field)) / sizeof(SARGABLE_PARAM);
   /* set a barrier for the array of SARGABLE_PARAM */
@@ -8428,7 +8519,23 @@ static bool update_ref_and_keys(THD *thd, Key_use_array *keyuse,
   }
   /* fill keyuse with found key parts */
   for (; field != end; field++) {
-    if (add_key_part(keyuse, field)) return true;
+    if (add_key_part(keyuse, field, &primary_keyuses)) return true;
+  }
+
+  /*
+    Primary-key Key_use entries recorded in primary_keyuses are not considered
+    for access method selection when the primary key has been masked out of
+    keys_in_use_for_query (e.g. by an INDEX hint). However, their const
+    keyparts are still relevant for ORDER BY/GROUP BY optimization via
+    TABLE::const_key_parts[]. Populate const_key_parts for those primary-key
+    parts that are constant for the execution.
+  */
+  for (auto use = primary_keyuses.begin(); use != primary_keyuses.end();
+       ++use) {
+    if (use->val->const_for_execution() &&
+        use->optimize != KEY_OPTIMIZE_REF_OR_NULL) {
+      use->table_ref->table->const_key_parts[use->key] |= use->keypart_map;
+    }
   }
 
   if (query_block->ftfunc_list->elements) {
@@ -9344,14 +9451,16 @@ void JOIN::finalize_derived_keys() {
       1) it is a materialized derived table, and
       2) it is not yet instantiated, and
       3) it has some keys defined, and
-      4) it has not yet been processed (may happen if there are more than one
+      4) keys have been added through this query block, and
+      5) it has not yet been processed (may happen if there are more than one
          local references to the same CTE, which are processed on seeing the
          first reference).
     */
     if (table == nullptr || !tr->uses_materialization() ||  // (1)
         table->is_created() ||                              // (2)
         table->s->keys == 0 ||                              // (3)
-        (processed_tables & tr->map())) {                   // (4)
+        table->s->owner_of_tmp_keys != query_block ||       // (4)
+        (processed_tables & tr->map())) {                   // (5)
       continue;
     }
     /*
@@ -9438,7 +9547,7 @@ void JOIN::finalize_derived_keys() {
       assert(old_idx != new_idx);
 
       if (old_idx > new_idx) {
-        assert(t->s->owner_of_possible_tmp_keys == query_block);
+        assert(t->s->owner_of_tmp_keys == query_block);
         Derived_refs_iterator it1(tr);
         while (TABLE *t1 = it1.get_next()) {
           /*
@@ -9483,11 +9592,9 @@ void JOIN::finalize_derived_keys() {
       }
     }
 
-    // Finally, we know how many keys remain in the table.
-    if (table->s->owner_of_possible_tmp_keys != query_block) continue;
+    // Release lock and remove the unused keys:
+    table->s->owner_of_tmp_keys = nullptr;
 
-    // Release lock:
-    table->s->owner_of_possible_tmp_keys = nullptr;
     it.rewind();
     while (TABLE *t = it.get_next()) {
       t->drop_unused_tmp_keys(it.is_first());
@@ -9886,8 +9993,10 @@ static bool make_join_query_block(JOIN *join, Item *cond) {
                   used_index(tab->range_scan()) != MAX_KEY) {
                 const uint ref_key = used_index(tab->range_scan());
                 bool skip_quick;
-                read_direction = test_if_order_by_key(
-                    &join->order, tab->table(), ref_key, nullptr, &skip_quick);
+                uint used_key_parts = 0;
+                read_direction =
+                    test_if_order_by_key(&join->order, tab->table(), ref_key,
+                                         &used_key_parts, &skip_quick);
                 if (skip_quick) read_direction = 0;
                 /*
                   If the index provides order there is no need to recheck
@@ -9901,8 +10010,15 @@ static bool make_join_query_block(JOIN *join, Item *cond) {
                 if (read_direction == 1 ||
                     (read_direction == -1 &&
                      reverse_sort_possible(tab->range_scan()) &&
-                     !make_reverse(get_used_key_parts(tab->range_scan()),
-                                   tab->range_scan()))) {
+                     // Ensure the reverse range scan uses at least as
+                     // many keyparts as ORDER BY; otherwise a composite
+                     // index might be scanned in reverse using only a
+                     // shorter prefix, and we would incorrectly treat
+                     // ORDER BY as satisfied.
+                     !make_reverse(
+                         std::max(used_key_parts,
+                                  get_used_key_parts(tab->range_scan())),
+                         tab->range_scan()))) {
                   recheck_reason = DONT_RECHECK;
                 }
               }
@@ -11510,6 +11626,13 @@ bool evaluate_during_optimization(const Item *item, const Query_block *select) {
   // If the Item does not access any tables, it can always be evaluated.
   if (item->const_item()) return true;
 
+  // Do not evaluate stored procedure in EXPLAIN
+  if (current_thd->lex->is_explain() &&
+      WalkItem(item, enum_walk::PREFIX, [](const Item *curitem) {
+        return curitem->has_stored_program();
+      }))
+    return false;
+
   return !item->has_subquery() || (select->active_options() &
                                    OPTION_NO_SUBQUERY_DURING_OPTIMIZATION) == 0;
 }
@@ -11629,8 +11752,15 @@ static double EstimateRowAccessesInItem(Item *item, double num_evaluations) {
       } else {
         path = qe->item->root_access_path();
       }
-      rows += EstimateRowAccesses(
-          path, query_block->is_cacheable() ? 1.0 : num_evaluations, kNoLimit);
+      // In some cases, for old optimizer, when subtitem is a
+      // Item_singlerow_subselect, its Query_expression::root_access_path has
+      // not been set, and Item_singlerow_subselect::root_access_path() always
+      // returns nullptr, so we need to check:
+      if (path != nullptr) {
+        rows += EstimateRowAccesses(
+            path, query_block->is_cacheable() ? 1.0 : num_evaluations,
+            kNoLimit);
+      }
     }
     return false;
   });

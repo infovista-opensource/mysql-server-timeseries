@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2024, Oracle and/or its affiliates.
+Copyright (c) 1995, 2026, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -978,7 +978,8 @@ int mtr_t::Logging::disable(THD *) {
     ut_ad(srv_is_being_started);
   }
 
-  ib::warn(ER_IB_WRN_REDO_DISABLED);
+  ulonglong current_lsn = log_get_lsn(*log_sys);
+  ib::warn(ER_IB_WRN_REDO_DISABLED_INFO, current_lsn);
   m_state.store(DISABLED);
 
   return 0;

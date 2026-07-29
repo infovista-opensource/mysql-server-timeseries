@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -51,6 +51,8 @@
 
 #define _STR_VALUE(x) #x
 #define STR_VALUE(x) _STR_VALUE(x)
+
+static int configErrorInsert = 0;
 
 /****************************************************************************
  * Section names
@@ -620,7 +622,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
 
     {CFG_DB_HEARTBEAT_INTERVAL, "HeartbeatIntervalDbDb", DB_TOKEN,
      "Time between " DB_TOKEN_PRINT "-" DB_TOKEN_PRINT
-     " heartbeats. " DB_TOKEN_PRINT " considered dead after 3 missed HBs",
+     " heartbeats. " DB_TOKEN_PRINT " considered dead after 4 missed HBs",
      ConfigInfo::CI_USED, 0, ConfigInfo::CI_INT,
 #if NDB_VERSION_D < NDB_MAKE_VERSION(7, 2, 0)
      "1500",
@@ -644,7 +646,9 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
 
     {CFG_DB_API_HEARTBEAT_INTERVAL, "HeartbeatIntervalDbApi", DB_TOKEN,
      "Time between " API_TOKEN_PRINT "-" DB_TOKEN_PRINT
-     " heartbeats. " API_TOKEN_PRINT " connection closed after 3 missed HBs",
+     " heartbeats. " DB_TOKEN_PRINT
+     " connection closed by API after 3 missed HBs. " API_TOKEN_PRINT
+     " connection closed by DB after 4 missed HBs.",
      ConfigInfo::CI_USED, 0, ConfigInfo::CI_INT, "1500", "100",
      STR_VALUE(MAX_INT_RNIL)},
 
@@ -804,11 +808,11 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
 
     {CFG_LOGLEVEL_STARTUP, "LogLevelStartup", DB_TOKEN,
      "Node startup info printed on stdout", ConfigInfo::CI_USED, false,
-     ConfigInfo::CI_INT, "1", "0", "15"},
+     ConfigInfo::CI_INT, "8", "0", "15"},
 
     {CFG_LOGLEVEL_SHUTDOWN, "LogLevelShutdown", DB_TOKEN,
      "Node shutdown info printed on stdout", ConfigInfo::CI_USED, false,
-     ConfigInfo::CI_INT, "0", "0", "15"},
+     ConfigInfo::CI_INT, "8", "0", "15"},
 
     {CFG_LOGLEVEL_STATISTICS, "LogLevelStatistic", DB_TOKEN,
      "Transaction, operation, transporter info printed on stdout",
@@ -820,11 +824,11 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
 
     {CFG_LOGLEVEL_NODERESTART, "LogLevelNodeRestart", DB_TOKEN,
      "Node restart, node failure info printed on stdout", ConfigInfo::CI_USED,
-     false, ConfigInfo::CI_INT, "0", "0", "15"},
+     false, ConfigInfo::CI_INT, "8", "0", "15"},
 
     {CFG_LOGLEVEL_CONNECTION, "LogLevelConnection", DB_TOKEN,
      "Node connect/disconnect info printed on stdout", ConfigInfo::CI_USED,
-     false, ConfigInfo::CI_INT, "0", "0", "15"},
+     false, ConfigInfo::CI_INT, "8", "0", "15"},
 
     {CFG_LOGLEVEL_CONGESTION, "LogLevelCongestion", DB_TOKEN,
      "Congestion info printed on stdout", ConfigInfo::CI_USED, false,
@@ -832,10 +836,17 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
 
     {CFG_LOGLEVEL_ERROR, "LogLevelError", DB_TOKEN,
      "Transporter, heartbeat errors printed on stdout", ConfigInfo::CI_USED,
-     false, ConfigInfo::CI_INT, "0", "0", "15"},
+     false, ConfigInfo::CI_INT, "8", "0", "15"},
 
-    {CFG_LOGLEVEL_INFO, "LogLevelInfo", DB_TOKEN,
-     "Heartbeat and log info printed on stdout", ConfigInfo::CI_USED, false,
+    {CFG_LOGLEVEL_INFO, "LogLevelInfo", DB_TOKEN, "Log info printed on stdout",
+     ConfigInfo::CI_USED, false, ConfigInfo::CI_INT, "0", "0", "15"},
+
+    {CFG_LOGLEVEL_BACKUP, "LogLevelBackup", DB_TOKEN,
+     "Backup info printed on stdout", ConfigInfo::CI_USED, false,
+     ConfigInfo::CI_INT, "0", "0", "15"},
+
+    {CFG_LOGLEVEL_SCHEMA, "LogLevelSchema", DB_TOKEN,
+     "Schema changes info printed on stdout", ConfigInfo::CI_USED, false,
      ConfigInfo::CI_INT, "0", "0", "15"},
 
     /**
@@ -1383,6 +1394,13 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
      "each " DB_TOKEN_PRINT " node",
      ConfigInfo::CI_USED, false, ConfigInfo::CI_INT,
      "0",  // "256K",
+     "0", STR_VALUE(MAX_INT_RNIL)},
+
+    {CFG_DB_API_FAILURE_HANDLING_TIMEOUT, "ApiFailureHandlingTimeout", DB_TOKEN,
+     "Maximum allowed duration of Api failure handling before escalating "
+     "handling.  0 implies no time limit, minimum usable value is 10.",
+     ConfigInfo::CI_USED, false, ConfigInfo::CI_INT,
+     "600",  // 10 minutes
      "0", STR_VALUE(MAX_INT_RNIL)},
 
     /***************************************************************************
@@ -2154,6 +2172,8 @@ ConfigInfo::ConfigInfo() : m_info(true), m_systemDefaults(true) {
   }
 }
 
+void ConfigInfo::insertError(int err) { configErrorInsert = err; }
+
 /****************************************************************************
  * Getters
  ****************************************************************************/
@@ -2842,7 +2862,7 @@ static bool checkLocalhostHostnameMix(InitConfigFileParser::Context &ctx,
     ctx.m_userProperties.put("$computer-localhost", hostname);
   }
 
-  if (localhost_used) {
+  if (localhost_used && configErrorInsert != 904) {
     ctx.reportError(
         "Mixing of localhost (default for [NDBD]HostName) with other "
         "hostname(%s) is illegal",

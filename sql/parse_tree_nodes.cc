@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2013, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -173,6 +173,10 @@ bool PT_joined_table::contextualize_tabs(Parse_context *pc) {
         static_cast<PT_joined_table_type>((m_type & ~JTT_RIGHT) | JTT_LEFT);
     std::swap(m_left_pt_table, m_right_pt_table);
   }
+
+  char buff[NAME_LEN + 1];
+  if (check_stack_overrun(pc->thd, STACK_MIN_SIZE, pointer_cast<uchar *>(buff)))
+    return true; /* purecov: inspected */
 
   if (m_left_pt_table->contextualize(pc) || m_right_pt_table->contextualize(pc))
     return true;
@@ -3876,6 +3880,11 @@ bool PT_table_factor_table_ident::do_contextualize(Parse_context *pc) {
   THD *thd = pc->thd;
   Yacc_state *yyps = &thd->m_parser_state->m_yacc;
 
+  if (pc->select->table_count() >= MAX_TABLES) {
+    my_error(ER_TOO_MANY_TABLES, MYF(0), static_cast<int>(MAX_TABLES));
+    return true;
+  }
+
   m_table_ref = pc->select->add_table_to_list(
       thd, table_ident, opt_table_alias, 0, yyps->m_lock_type, yyps->m_mdl_type,
       opt_key_definition, opt_use_partition, nullptr, pc);
@@ -4289,6 +4298,11 @@ bool PT_select_var_list::do_contextualize(Parse_context *pc) {
 }
 
 bool PT_query_expression::do_contextualize(Parse_context *pc) {
+  if (!pc->thd->lex->opt_hints_global)
+    pc->thd->lex->opt_hints_global =
+        new (pc->thd->mem_root) Opt_hints_global(pc->thd->mem_root);
+  pc->thd->lex->opt_hints_global->deferred_hints =
+      new (pc->thd->mem_root) PT_hint_list(pc->thd->mem_root);
   pc->m_stack.push_back(
       QueryLevel(pc->mem_root, SC_QUERY_EXPRESSION, m_order != nullptr));
   if (contextualize_safe(pc, m_with_clause))
@@ -4405,6 +4419,7 @@ bool PT_query_expression::do_contextualize(Parse_context *pc) {
     } break;
   }
 
+  contextualize_deferred_hints(pc);
   return false;
 }
 
@@ -5160,7 +5175,9 @@ PT_install_component::PT_install_component(
 
 Sql_cmd *PT_install_component::make_cmd(THD *thd) {
   thd->lex->sql_command = SQLCOM_INSTALL_COMPONENT;
-
+  thd->lex->expr_allows_subquery = false;
+  auto f =
+      create_scope_guard([thd]() { thd->lex->expr_allows_subquery = true; });
   if (!m_set_elements->is_empty()) {
     Parse_context pc(thd, thd->lex->current_query_block());
     for (auto &elt : *m_set_elements) {

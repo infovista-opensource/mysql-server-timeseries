@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2011, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -157,6 +157,7 @@ void Gtid_state::broadcast_owned_sidnos(const THD *thd) {
 
 void Gtid_state::update_commit_group(THD *first_thd) {
   DBUG_TRACE;
+  mysql_mutex_assert_owner(mysql_bin_log.get_commit_lock());
 
   bool gtid_threshold_breach = false;
   /*
@@ -760,6 +761,9 @@ bool Gtid_state::update_gtids_impl_check_skip_gtid_rollback(THD *thd) {
   if (thd->skip_gtid_rollback) {
     DBUG_PRINT("info", ("skipping gtid rollback because "
                         "thd->skip_gtid_rollback is set"));
+    return true;
+  }
+  if (thd->shall_skip_gtid_rollback()) {
     return true;
   }
   return false;

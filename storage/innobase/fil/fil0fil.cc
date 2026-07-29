@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2024, Oracle and/or its affiliates.
+Copyright (c) 1995, 2026, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -327,9 +327,6 @@ enum fil_operation_t {
 
 /** The null file address */
 fil_addr_t fil_addr_null = {FIL_NULL, 0};
-
-/** Maximum number of pages to read to determine the space ID. */
-static const size_t MAX_PAGES_TO_READ = 1;
 
 #ifndef UNIV_HOTBACKUP
 /** Maximum number of shards supported. */
@@ -1628,9 +1625,12 @@ class Fil_system {
   mapping table. */
   dberr_t scan() { return m_dirs.scan(); }
 
-  /** Get the tablespace ID from an .ibd and/or an undo tablespace. If the ID is
-  0 on the first page then try finding the ID with Datafile::find_space_id().
-  @param[in]    filename        File name to check
+  /** Get the tablespace ID from an .ibd and/or an undo tablespace. If the
+  read failed or the ID is 0 on the first page or there is a mismatch of
+  space_ids stored in FSP_SPACE_ID and FIL_PAGE_SPACE_ID, then try finding
+  the ID with Datafile::find_space_id(). This function should only be called
+  during server startup.
+  @param[in]      filename        File name to check
   @return s_invalid_space_id if not found, otherwise the space ID */
   [[nodiscard]] static space_id_t get_tablespace_id(
       const std::string &filename);
@@ -4890,7 +4890,10 @@ static void fil_op_write_space_extend(space_id_t space_id, os_offset_t offset,
 
   DBUG_EXECUTE_IF(
       "ib_redo_log_system_tablespace_expansion", if (space_id == 0) {
-        ib::info() << "System tablespace expansion is redo logged.";
+        /* info message requires increasing the log level of the test,
+        and the test happens to produce the huge logs. Therefore, produce a
+        warning that doesn't require increasing the log level */
+        ib::warn() << "System tablespace expansion is redo logged.";
       });
 }
 #endif
@@ -7795,6 +7798,7 @@ dberr_t Fil_shard::do_io(const IORequest &type, bool sync,
 #ifndef UNIV_HOTBACKUP
     if (req_type.is_write() && bpage != nullptr && bpage->is_stale()) {
       ut_a(bpage->get_space()->id == page_id.space());
+      mutex_release();
       return DB_PAGE_IS_STALE;
     }
 #endif /* !UNIV_HOTBACKUP */
@@ -9667,6 +9671,10 @@ Free the Tablespace_files instance.
 @param[in]      read_only_mode  true if InnoDB is started in read only mode.
 @return DB_SUCCESS if all OK */
 dberr_t Fil_system::prepare_open_for_business(bool read_only_mode) {
+  if (m_moved.empty()) {
+    return DB_SUCCESS;
+  }
+
   if (read_only_mode) {
     for (auto &tablespace : m_moved) {
       auto old_path = tablespace.old_path;
@@ -9706,6 +9714,7 @@ dberr_t Fil_system::prepare_open_for_business(bool read_only_mode) {
   size_t batch_size = 0;
   bool print_msg = false;
   auto start_time = std::chrono::steady_clock::now();
+  const auto dirs_in_datadir = Dirs_in_datadir::make();
 
   /* If some file paths have changed then update the DD */
   for (auto &tablespace : m_moved) {
@@ -9747,7 +9756,7 @@ dberr_t Fil_system::prepare_open_for_business(bool read_only_mode) {
       location which is different from default data directory path. */
       if (dd_flag_missing || !fpath_old.is_dir_same_as(fpath_new)) {
         err = dd_update_table_and_partitions_after_dir_change(
-            object_id, fpath_new.abs_path());
+            object_id, fpath_new.abs_path(), dirs_in_datadir);
 
         if (err != DB_SUCCESS) {
           ib::error(ER_DD_UPDATE_DATADIR_FLAG_FAIL, object_id,
@@ -9866,6 +9875,45 @@ bool Fil_system::lookup_for_recovery(space_id_t space_id) {
   return is_known;
 }
 
+/** Real path of the input directory
+@param[in]  dir  Directory path
+@return normalized real path, without trailing separator */
+static std::string fil_real_dir_for_lookup(const std::string &dir) {
+  auto real_dir = Fil_path::get_real_path(dir);
+  Fil_path::trim_separator(real_dir);
+
+  return real_dir;
+}
+
+Dirs_in_datadir Dirs_in_datadir::make() {
+  Dirs_in_datadir schema_dirs;
+  const auto datadir = MySQL_datadir_path.abs_path();
+
+  if (datadir.empty()) {
+    return schema_dirs;
+  }
+
+  Dir_Walker::walk(datadir, false, [&](const std::string &path) {
+    if (!Dir_Walker::is_directory(path)) {
+      return;
+    }
+
+    const auto schema_dir = fil_real_dir_for_lookup(path);
+
+    if (!schema_dir.empty()) {
+      schema_dirs.m_dirs.insert(schema_dir);
+    }
+  });
+
+  return schema_dirs;
+}
+
+bool Dirs_in_datadir::contains(const std::string &discovered_dir) const {
+  const auto real_dir = fil_real_dir_for_lookup(discovered_dir);
+
+  return !real_dir.empty() && m_dirs.find(real_dir) != m_dirs.end();
+}
+
 /** Lookup the tablespace ID.
 @param[in]      space_id                Tablespace ID to lookup
 @return true if the space ID is known. */
@@ -9928,6 +9976,7 @@ dberr_t fil_tablespace_open_for_recovery(space_id_t space_id) {
 
 Fil_state fil_tablespace_path_equals(space_id_t space_id,
                                      const char *space_name, ulint fsp_flags,
+                                     const Dirs_in_datadir &schema_dirs,
                                      std::string old_path,
                                      std::string *new_path) {
   ut_a(!recv_recovery_is_on());
@@ -10027,22 +10076,20 @@ Fil_state fil_tablespace_path_equals(space_id_t space_id,
 
   new_dir.resize(pos + 1);
 
-  const bool new_same_as_default = MySQL_datadir_path.is_same_as(new_dir) ||
-                                   MySQL_datadir_path.is_ancestor(new_dir);
-
   if (old_dir != new_dir) {
     *new_path = result.first + result.second->front();
     return Fil_state::MOVED;
-  } else if (!new_same_as_default && Fil_path::has_suffix(IBD, old_path) &&
-             !fsp_is_shared_tablespace(fsp_flags)) {
+  } else if (Fil_path::has_suffix(IBD, old_path) &&
+             !fsp_is_shared_tablespace(fsp_flags) &&
+             !schema_dirs.contains(new_dir)) {
     /* We want to recognize those tables which are moved in previous versions
     and mark the DD_TABLE_DATA_DIRECTORY flag as true as we need to make sure
     dd_table is in sync with current status of the table. This condition is hit
     by tables which are moved in previous versions of server
     before 8.0.38/8.4.1/9.0. old dir and new dir will be same but different from
-    default dir. So marking these tables as MOVED_PREV which is referred later
-    to set the flag. The shared tablespace are ignored becasue they can't have
-    data directory flag.*/
+    default schema dir. So marking these tables as MOVED_PREV which is referred
+    later to set the flag. The shared tablespace are ignored because they can't
+    have data directory flag.*/
 
     const auto components = dict_name::parse_tablespace_path(old_path);
     if (components.has_value()) {
@@ -10548,7 +10595,7 @@ const byte *fil_tablespace_redo_extend(const byte *ptr, const byte *end,
 
 #if defined(UNIV_DEBUG)
   /* Validate that there are no pages in the buffer pool. */
-  buf_must_be_all_freed();
+  buf_assert_all_are_replaceable();
 #endif /* UNIV_DEBUG */
 
   /* Adjust the actual allocation size to take care of the allocation
@@ -11003,116 +11050,65 @@ static bool fil_op_replay_rename(const page_id_t &page_id,
   return true;
 }
 
-/** Get the tablespace ID from an .ibd and/or an undo tablespace. If the ID is 0
-on the first page then try finding the ID with Datafile::find_space_id().
-@param[in]      filename        File name to check
-@return s_invalid_space_id if not found, otherwise the space ID */
 space_id_t Fil_system::get_tablespace_id(const std::string &filename) {
-  FILE *fp = fopen(filename.c_str(), "rb");
+  pfs_os_file_t file;
+  bool success;
 
-  if (fp == nullptr) {
+  /* Lambda function for heavy-duty method of finding the space id from
+  Datafile::find_space_id() which we fallback into, if the first page
+  cannot be read properly. */
+  const auto find_space_id_reliably = [&filename]() -> space_id_t {
+    Datafile data_file;
+
+    data_file.set_filepath(filename.c_str());
+    const dberr_t err = data_file.open_read_only(false);
+
+    ut_a(data_file.is_open());
+    ut_a(err == DB_SUCCESS);
+
+    /* Use the heavier Datafile::find_space_id() method to find the space id. */
+    return (data_file.find_space_id() == DB_SUCCESS)
+               ? data_file.space_id()
+               : dict_sys_t::s_invalid_space_id;
+  };
+
+  /* Open the file with O_DIRECT flag for faster access */
+  file = os_file_create(innodb_data_file_key, filename.c_str(), OS_FILE_OPEN,
+                        OS_DATA_FILE_FOR_SPACE_ID_READ, true, &success);
+  if (!success) {
+    os_file_get_last_error(true);
     ib::warn(ER_IB_MSG_372) << "Unable to open '" << filename << "'";
     return dict_sys_t::s_invalid_space_id;
   }
 
-  std::vector<space_id_t> space_ids;
-  auto page_size = srv_page_size;
+  space_id_t space_id = dict_sys_t::s_invalid_space_id;
 
-  space_ids.reserve(MAX_PAGES_TO_READ);
+  auto buf = ut::make_unique_aligned<byte[]>(srv_page_size, srv_page_size);
 
-  const auto n_bytes = page_size * MAX_PAGES_TO_READ;
+  IORequest request(IORequest::READ);
+  ulint bytes_read = 0;
+  /* Disable the warning if we try to read compressed tablespace which has
+  data less than the read size i.e., srv_page_size */
+  request.disable_partial_io_warnings();
 
-  std::unique_ptr<byte[]> buf(new byte[n_bytes]);
+  dberr_t err =
+      os_file_read_no_error_handling(request, filename.c_str(), file, buf.get(),
+                                     0, srv_page_size, &bytes_read);
 
-  if (!buf) {
-    return dict_sys_t::s_invalid_space_id;
+  os_file_close(file);
+
+  DBUG_EXECUTE_IF("invalid_header", bytes_read = 0;);
+
+  if (err != DB_SUCCESS || (bytes_read != srv_page_size)) {
+    /* Reading from the first page failed, falling back to heavy duty method */
+    return find_space_id_reliably();
   }
 
-  auto pages_read = fread(buf.get(), page_size, MAX_PAGES_TO_READ, fp);
+  /* Read the space_id from buf at offset FIL_PAGE_SPACE_ID */
+  space_id = fsp_header_get_space_id(buf.get());
 
-  DBUG_EXECUTE_IF("invalid_header", pages_read = 0;);
-
-  /* Find the space id from the pages read if enough pages could be read.
-  Fall back to the more heavier method of finding the space id from
-  Datafile::find_space_id() if pages cannot be read properly. */
-  if (pages_read >= MAX_PAGES_TO_READ) {
-    auto bytes_read = pages_read * page_size;
-
-#ifdef POSIX_FADV_DONTNEED
-    posix_fadvise(fileno(fp), 0, bytes_read, POSIX_FADV_DONTNEED);
-#endif /* POSIX_FADV_DONTNEED */
-
-    for (page_no_t i = 0; i < MAX_PAGES_TO_READ; ++i) {
-      const auto off = i * page_size + FIL_PAGE_SPACE_ID;
-
-      if (off == FIL_PAGE_SPACE_ID) {
-        /* Find out the page size of the tablespace from the first page.
-        In case of compressed pages, the subsequent pages can be of different
-        sizes. If MAX_PAGES_TO_READ is changed to a different value, then the
-        page size of subsequent pages is needed to find out the offset for
-        space ID. */
-
-        auto space_flags_offset = FSP_HEADER_OFFSET + FSP_SPACE_FLAGS;
-
-        ut_a(space_flags_offset + 4 < n_bytes);
-
-        const auto flags = mach_read_from_4(buf.get() + space_flags_offset);
-
-        page_size_t space_page_size(flags);
-
-        page_size = space_page_size.physical();
-      }
-
-      space_ids.push_back(mach_read_from_4(buf.get() + off));
-
-      if ((i + 1) * page_size >= bytes_read) {
-        break;
-      }
-    }
-  }
-
-  fclose(fp);
-
-  space_id_t space_id;
-
-  if (!space_ids.empty()) {
-    space_id = space_ids.front();
-
-    for (auto id : space_ids) {
-      if (id == 0 || space_id != id) {
-        space_id = UINT32_UNDEFINED;
-
-        break;
-      }
-    }
-  } else {
-    space_id = UINT32_UNDEFINED;
-  }
-
-  /* Try the more heavy duty method, as a last resort. */
-  if (space_id == UINT32_UNDEFINED) {
-    /* If the first page cannot be read properly, then for compressed
-    tablespaces we don't know where the page boundary starts because
-    we don't know the page size. */
-
-    Datafile file;
-
-    file.set_filepath(filename.c_str());
-
-    dberr_t err = file.open_read_only(false);
-
-    ut_a(file.is_open());
-    ut_a(err == DB_SUCCESS);
-
-    /* Use the heavier Datafile::find_space_id() method to
-    find the space id. */
-    err = file.find_space_id();
-
-    if (err == DB_SUCCESS) {
-      space_id = file.space_id();
-    }
-
-    file.close();
+  if (space_id == 0 || space_id == SPACE_UNKNOWN) {
+    return find_space_id_reliably();
   }
 
   return space_id;

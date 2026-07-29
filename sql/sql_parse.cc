@@ -1,4 +1,4 @@
-/* Copyright (c) 1999, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 1999, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -2458,15 +2458,17 @@ done:
 
   thd->rpl_thd_ctx.session_gtids_ctx().notify_after_response_packet(thd);
 
-  if (!thd->is_error() && !thd->killed)
-    mysql_event_tracking_general_notify(
-        thd, AUDIT_EVENT(EVENT_TRACKING_GENERAL_RESULT), 0, nullptr, 0);
-
   const std::string &cn = Command_names::str_global(command);
-  mysql_event_tracking_general_notify(
-      thd, AUDIT_EVENT(EVENT_TRACKING_GENERAL_STATUS),
-      thd->get_stmt_da()->is_error() ? thd->get_stmt_da()->mysql_errno() : 0,
-      cn.c_str(), cn.length());
+  if (command != COM_STMT_EXECUTE) {
+    if (!thd->is_error() && !thd->killed)
+      mysql_event_tracking_general_notify(
+          thd, AUDIT_EVENT(EVENT_TRACKING_GENERAL_RESULT), 0, nullptr, 0);
+
+    mysql_event_tracking_general_notify(
+        thd, AUDIT_EVENT(EVENT_TRACKING_GENERAL_STATUS),
+        thd->get_stmt_da()->is_error() ? thd->get_stmt_da()->mysql_errno() : 0,
+        cn.c_str(), cn.length());
+  }
 
   /* command_end is informational only. The plugin cannot abort
      execution of the command at this point. */
@@ -4954,6 +4956,18 @@ finish:
     }
   }
 
+  if (thd->get_command() == COM_STMT_EXECUTE) {
+    if (!thd->is_error() && !thd->killed)
+      mysql_event_tracking_general_notify(
+          thd, AUDIT_EVENT(EVENT_TRACKING_GENERAL_RESULT), 0, nullptr, 0);
+
+    const std::string &cn = Command_names::str_global(thd->get_command());
+    mysql_event_tracking_general_notify(
+        thd, AUDIT_EVENT(EVENT_TRACKING_GENERAL_STATUS),
+        thd->get_stmt_da()->is_error() ? thd->get_stmt_da()->mysql_errno() : 0,
+        cn.c_str(), cn.length());
+  }
+
   lex->cleanup(true);
 
   /* Free tables */
@@ -5937,6 +5951,28 @@ bool PT_common_table_expr::match_table_ref(Table_ref *tl, bool in_self,
 }
 
 /**
+  Check PROCESS privilege enforcement for DD-based
+  INFORMATION_SCHEMA system views.
+
+  @param thd      Current session.
+  @param table_name   name of the INFORMATION_SCHEMA table
+
+  @retval
+    false   table does not need PROCESS priv or user lacks PROCESS privilege
+    true    table requires PROCESS priv and user has PROCESS privilege
+*/
+
+static bool table_requires_process_priv(THD *thd, const char *table_name) {
+  return ((!strcmp(table_name, "INNODB_FIELDS") ||
+           !strcmp(table_name, "INNODB_DATAFILES") ||
+           !strcmp(table_name, "INNODB_FOREIGN") ||
+           !strcmp(table_name, "INNODB_FOREIGN_COLS") ||
+           !strcmp(table_name, "INNODB_TABLESPACES_BRIEF") ||
+           !strcmp(table_name, "FILES")) &&
+          check_global_access(thd, PROCESS_ACL));
+}
+
+/**
   Add a table to list of used tables.
 
   @param thd      Current session.
@@ -6077,12 +6113,10 @@ Table_ref *Query_block::add_table_to_list(
         }
 
         /*
-          Stop users from accessing I_S.FILES if they do not have
-          PROCESS privilege.
+          Enforce PROCESS privilege for DD-based INFORMATION_SCHEMA views
+          handled in the SQL layer.
         */
-        if (!strcmp(ptr->table_name, "FILES") &&
-            check_global_access(thd, PROCESS_ACL))
-          return nullptr;
+        if (table_requires_process_priv(thd, ptr->table_name)) return nullptr;
       }
     } else {
       schema_table = find_schema_table(thd, ptr->table_name);

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -37,6 +37,7 @@
 #include "my_getopt.h"
 #include "portlib/NdbTick.h"
 #include "portlib/ssl_applink.h"
+#include "util/cstrbuf.h"
 #include "util/ndb_openssl_evp.h"  // ndb_openssl_evp::library_init()
 #include "util/require.h"
 
@@ -45,6 +46,7 @@
 #include "consumer_restore.hpp"
 #include "my_alloc.h"
 #include "nulls.h"
+#include "scope_guard.h"
 
 #include <NdbThread.h>
 
@@ -62,7 +64,8 @@ extern RestoreLogger restoreLogger;
 static Uint32 g_tableCompabilityMask = 0;
 static int ga_nodeId = 0;
 static int ga_nParallelism = 128;
-static int ga_backupId = 0;
+static int64 ga_inputBackupId = -1;
+static Uint32 ga_backupId = 0;
 bool ga_dont_ignore_systab_0 = false;
 static bool ga_no_upgrade = false;
 static bool ga_promote_attributes = false;
@@ -84,6 +87,11 @@ static const char *ga_backupPath = default_backupPath;
 
 static bool opt_decrypt = false;
 
+static Uint32 opt_read_size = 0;
+constexpr Uint32 MIN_READ_SIZE = 128 * 1024;
+constexpr Uint32 MAX_READ_SIZE = 32 * 1024 * 1024;
+constexpr Uint32 DEFAULT_READ_SIZE = BackupFile::DEFAULT_BUFFER_SIZE;
+
 // g_backup_password global, directly accessed in Restore.cpp.
 ndb_password_state g_backup_password_state("backup", nullptr);
 static ndb_password_option opt_backup_password(g_backup_password_state);
@@ -95,6 +103,8 @@ const char *opt_ndb_table = NULL;
 unsigned int opt_verbose;
 unsigned int opt_hex_format;
 bool opt_show_part_id = true;
+bool opt_show_node_id;
+bool opt_show_log_level;
 unsigned int opt_progress_frequency;
 NDB_TICKS g_report_prev;
 Vector<BaseString> g_databases;
@@ -105,6 +115,10 @@ Properties g_rewrite_databases;
 NdbRecordPrintFormat g_ndbrecord_print_format;
 unsigned int opt_no_binlog;
 static bool opt_timestamp_printouts;
+/* Limit per thread max transactions to 1024 until fix of
+ * Bug#38558743 NdbAPI limited to 1024 transactions/Ndb object
+ */
+static constexpr int MaxTransactionsPerThread = 1024;
 
 Ndb_cluster_connection *g_cluster_connection = NULL;
 
@@ -152,6 +166,7 @@ bool ga_skip_unknown_objects = false;
 bool ga_skip_broken_objects = false;
 bool ga_allow_pk_changes = false;
 bool ga_ignore_extended_pk_updates = false;
+int ga_hint = 0;
 BaseString g_options("ndb_restore");
 static int ga_num_slices = 1;
 static int ga_slice_id = 0;
@@ -187,6 +202,7 @@ static const char *opt_include_databases = NULL;
 static const char *opt_rewrite_database = NULL;
 static const char *opt_one_remap_col_arg = NULL;
 static bool opt_restore_privilege_tables = false;
+bool opt_skip_fk_checks = false;
 
 /**
  * ExtraTableInfo
@@ -289,8 +305,8 @@ static struct my_option my_long_options[] = {
      "Read encryption password for backup file from stdin",
      &opt_backup_password_from_stdin.opt_value, nullptr, 0, GET_BOOL, NO_ARG, 0,
      0, 0, nullptr, 0, &opt_backup_password_from_stdin},
-    {"backupid", 'b', "Backup id", &ga_backupId, nullptr, nullptr, GET_INT,
-     REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+    {"backupid", 'b', "Backup id", &ga_inputBackupId, nullptr, nullptr, GET_LL,
+     REQUIRED_ARG, -1, -1, 0, 0, 0, 0},
     {"decrypt", NDB_OPT_NOSHORT, "Decrypt file", &opt_decrypt, nullptr, nullptr,
      GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
     {"restore_data", 'r',
@@ -332,10 +348,9 @@ static struct my_option my_long_options[] = {
      "Skip table structure check during restore of data", &ga_skip_table_check,
      nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
     {"parallelism", 'p',
-     "No of parallel transactions during restore of data."
-     "(parallelism can be 1 to 1024)",
-     &ga_nParallelism, nullptr, nullptr, GET_INT, REQUIRED_ARG, 128, 1, 1024, 0,
-     1, 0},
+     "Max no of parallel transactions during restore of data", &ga_nParallelism,
+     nullptr, nullptr, GET_INT, REQUIRED_ARG, 128, 1,
+     (MaxTransactionsPerThread * g_max_parts), 0, 1, 0},
     {"print", NDB_OPT_NOSHORT, "Print metadata, data and log to stdout",
      &_print, nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
     {"print_data", NDB_OPT_NOSHORT, "Print data to stdout", &_print_data,
@@ -439,6 +454,13 @@ static struct my_option my_long_options[] = {
     {"skip-broken-objects", 256, "Skip broken object when parsing backup",
      &ga_skip_broken_objects, nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0,
      0},
+    {"show-log-level", 256,
+     "Include log level in log message. Deprecated, log level will always "
+     "be included in future.",
+     &opt_show_log_level, nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+    {"show-node-id", 256,
+     "Prefix log messages with node of that ndb_restore uses",
+     &opt_show_node_id, nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
     {"show-part-id", 256, "Prefix log messages with backup part ID",
      &opt_show_part_id, nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #ifdef ERROR_INSERT
@@ -466,6 +488,16 @@ static struct my_option my_long_options[] = {
      "conversions.",
      &opt_one_remap_col_arg, nullptr, nullptr, GET_STR, REQUIRED_ARG, 0, 0, 0,
      0, 0, 0},
+    {"skip-fk-checks", NDB_OPT_NOSHORT,
+     "Skip checking foreign key integrity when rebuilding foreign keys",
+     &opt_skip_fk_checks, nullptr, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+    {"read-size", NDB_OPT_NOSHORT,
+     "Set size in bytes of buffer for reading from Backup files",
+     &opt_read_size, nullptr, nullptr, GET_UINT, REQUIRED_ARG,
+     DEFAULT_READ_SIZE, MIN_READ_SIZE, MAX_READ_SIZE, nullptr, 0, nullptr},
+    {"hint", NDB_OPT_NOSHORT,
+     "Hint all transactions to node id of backup being restored", &ga_hint,
+     nullptr, nullptr, GET_BOOL, OPT_ARG, 0, 0, 0, 0, 0, 0},
     NdbStdOpt::end_of_options};
 
 static bool parse_remap_option(const BaseString option, BaseString &db_name,
@@ -546,17 +578,18 @@ static bool get_one_option(int optid, const struct my_option *opt,
       break;
     case 'n':
       if (ga_nodeId == 0) {
-        err << "Error in --nodeid,-n setting, see --help";
+        err << "Error in --nodeid,-n setting, see --help" << endl;
         exitHandler(NdbToolsProgramExitCode::WRONG_ARGS);
       }
       info.setLevel(254);
       info << "Nodeid = " << ga_nodeId << endl;
       break;
     case 'b':
-      if (ga_backupId == 0) {
-        err << "Error in --backupid,-b setting, see --help";
+      if (ga_inputBackupId == -1 || (ga_inputBackupId >= (int64(1) << 32))) {
+        err << "Error in --backupid,-b setting, see --help" << endl;
         exitHandler(NdbToolsProgramExitCode::WRONG_ARGS);
       }
+      ga_backupId = Uint32(ga_inputBackupId);
       info.setLevel(254);
       info << "Backup Id = " << ga_backupId << endl;
       break;
@@ -683,6 +716,7 @@ bool readArguments(Ndb_opts &opts, char ***pargv) {
     }
     exitHandler(NdbToolsProgramExitCode::WRONG_ARGS);
   }
+  restoreLogger.set_print_log_level(opt_show_log_level);
   if (!opt_timestamp_printouts) {
     restoreLogger.set_print_timestamp(false);
   }
@@ -690,7 +724,7 @@ bool readArguments(Ndb_opts &opts, char ***pargv) {
     err << "Backup file node ID not specified, please provide --nodeid" << endl;
     exitHandler(NdbToolsProgramExitCode::WRONG_ARGS);
   }
-  if (ga_backupId == 0) {
+  if (ga_inputBackupId == -1) {
     err << "Backup ID not specified, please provide --backupid" << endl;
     exitHandler(NdbToolsProgramExitCode::WRONG_ARGS);
   }
@@ -1185,6 +1219,16 @@ static inline bool checkDbAndTableName(const TableS *table) {
   return false;
 }
 
+static inline bool rebuildSysTableIdx(const TableS *table) {
+  const char *table_name = table->getTableName();
+  bool res = false;
+
+  res |= opt_include_stored_grants &&
+         strcmp(table_name, NDB_REP_DB "/def/" NDB_SQL_METADATA_TABLE) == 0;
+  res |= checkSysTable(table) && checkDbAndTableName(table);
+  return res;
+}
+
 static void exclude_missing_tables(const RestoreMetaData &metaData,
                                    const Vector<BackupConsumer *> g_consumers) {
   Uint32 i, j;
@@ -1594,12 +1638,12 @@ static bool setup_column_remappings(RestoreMetaData &metaData) {
 }
 
 static void free_data_callback(void *ctx) {
-  // RestoreThreadData is passed as context object to in RestoreDataIterator
-  // ctor. RestoreDataIterator calls callback function with context object
+  // RestoreThreadData is passed as context object to Iterators
+  // Iterators call callback function with context object
   // as parameter, so that callback can extract thread info from it.
   RestoreThreadData *data = (RestoreThreadData *)ctx;
   for (Uint32 i = 0; i < data->m_consumers.size(); i++)
-    data->m_consumers[i]->tuple_free();
+    data->m_consumers[i]->data_free();
 }
 
 static void free_include_excludes_vector() {
@@ -1773,11 +1817,12 @@ int do_restore(RestoreThreadData *thrdata) {
   init_progress();
 
   Vector<BackupConsumer *> &g_consumers = thrdata->m_consumers;
-  char threadName[15] = "";
-  if (opt_show_part_id)
-    BaseString::snprintf(threadName, sizeof(threadName), "[part %u] ",
-                         thrdata->m_part_id);
-  restoreLogger.setThreadPrefix(threadName);
+  cstrbuf<30> threadName;
+  if (opt_show_node_id)
+    threadName.appendf("Node %u: ", g_cluster_connection->node_id());
+  if (opt_show_part_id) threadName.appendf("[part %u] ", thrdata->m_part_id);
+  require(!threadName.is_truncated());
+  restoreLogger.setThreadPrefix(threadName.c_str());
 
   /**
    * we must always load meta data, even if we will only print it to stdout
@@ -1796,6 +1841,12 @@ int do_restore(RestoreThreadData *thrdata) {
   }
 #endif
   restoreLogger.log_info("[restore_metadata] Read meta data file header");
+
+  if (!metaData.openFile()) {
+    restoreLogger.log_error("Failed to open %s", metaData.getFilename());
+    return NdbToolsProgramExitCode::FAILED;
+  }
+  Scope_guard close_meta_data_file_on_error(CloseFileUnchecked{metaData});
 
   if (!metaData.readHeader()) {
     restoreLogger.log_error("Failed to read %s", metaData.getFilename());
@@ -1914,6 +1965,10 @@ int do_restore(RestoreThreadData *thrdata) {
     restoreLogger.log_error("Restore: Failed to validate footer.");
     return NdbToolsProgramExitCode::FAILED;
   }
+
+  close_meta_data_file_on_error.release();
+  metaData.closeFile(/* abort */ false);
+
   restoreLogger.log_debug("Init Backup objects");
   Uint32 i;
   for (i = 0; i < g_consumers.size(); i++) {
@@ -1981,6 +2036,9 @@ int do_restore(RestoreThreadData *thrdata) {
       restoreLogger.log_info(" Object create progress: %u objects out of %u",
                              i + 1, metaData.getNoOfObjects());
     }
+    if (ga_error_thread > 0) {
+      return NdbToolsProgramExitCode::FAILED;
+    }
   }
 
   restoreLogger.log_debug("Handling index stat tables");
@@ -1988,6 +2046,9 @@ int do_restore(RestoreThreadData *thrdata) {
     if (!g_consumers[i]->handle_index_stat_tables()) {
       restoreLogger.log_error(
           "Restore: Failed to handle index stat tables ... Exiting ");
+      return NdbToolsProgramExitCode::FAILED;
+    }
+    if (ga_error_thread > 0) {
       return NdbToolsProgramExitCode::FAILED;
     }
   }
@@ -2049,6 +2110,9 @@ int do_restore(RestoreThreadData *thrdata) {
       restoreLogger.log_info("Table create progress: %u tables out of %u",
                              i + 1, metaData.getNoOfTables());
     }
+    if (ga_error_thread > 0) {
+      return NdbToolsProgramExitCode::FAILED;
+    }
   }
 
   restoreLogger.log_debug("Save foreign key info");
@@ -2056,6 +2120,9 @@ int do_restore(RestoreThreadData *thrdata) {
   for (i = 0; i < metaData.getNoOfObjects(); i++) {
     for (Uint32 j = 0; j < g_consumers.size(); j++) {
       if (!g_consumers[j]->fk(metaData.getObjType(i), metaData.getObjPtr(i))) {
+        return NdbToolsProgramExitCode::FAILED;
+      }
+      if (ga_error_thread > 0) {
         return NdbToolsProgramExitCode::FAILED;
       }
     }
@@ -2094,6 +2161,7 @@ int do_restore(RestoreThreadData *thrdata) {
   }
   restoreLogger.log_debug("Iterate over data");
   restoreLogger.log_info("[restore_data] Start restoring table data");
+  int snapshotstart = -1;
   if (ga_restore || ga_print) {
     Uint32 fragmentsTotal = 0;
     Uint32 fragmentsRestored = 0;
@@ -2143,7 +2211,12 @@ int do_restore(RestoreThreadData *thrdata) {
       }
 
       RestoreDataIterator dataIter(metaData, &free_data_callback,
-                                   (void *)thrdata);
+                                   (void *)thrdata, opt_read_size);
+#ifdef ERROR_INSERT
+      if (_error_insert > 0) {
+        dataIter.error_insert(_error_insert);
+      }
+#endif
 
       if (!dataIter.validateBackupFile()) {
         restoreLogger.log_error(
@@ -2151,13 +2224,13 @@ int do_restore(RestoreThreadData *thrdata) {
         return NdbToolsProgramExitCode::FAILED;
       }
 
-      if (!dataIter.validateRestoreDataIterator()) {
-        restoreLogger.log_error(
-            "Unable to allocate memory for RestoreDataIterator constructor");
+      restoreLogger.log_info("[restore_data] Read data file header");
+
+      if (!dataIter.openFile()) {
+        restoreLogger.log_error("Failed to open data file. Exiting...");
         return NdbToolsProgramExitCode::FAILED;
       }
-
-      restoreLogger.log_info("[restore_data] Read data file header");
+      Scope_guard close_data_file_on_error(CloseFileUnchecked{dataIter});
 
       // Read data file header
       if (!dataIter.readHeader()) {
@@ -2223,6 +2296,9 @@ int do_restore(RestoreThreadData *thrdata) {
           ndbout.m_out = tmp;
           if (check_progress())
             report_progress("Data file progress: ", dataIter);
+          if (ga_error_thread > 0) {
+            return NdbToolsProgramExitCode::FAILED;
+          }
         }  // while (tuple != NULL);
 
         if (res < 0) {
@@ -2247,7 +2323,22 @@ int do_restore(RestoreThreadData *thrdata) {
 
       dataIter.validateFooter();  // not implemented
 
-      for (i = 0; i < g_consumers.size(); i++) g_consumers[i]->endOfTuples();
+      close_data_file_on_error.release();
+      dataIter.closeFile(/* abort */ false);
+
+      {
+        bool consumersOk = true;
+        for (i = 0; i < g_consumers.size(); i++) {
+          consumersOk &= g_consumers[i]->endOfTuples();
+        }
+
+        if (!consumersOk) {
+          restoreLogger.log_error(
+              "Restore: An error occurred while restoring data."
+              "Exiting");
+          return NdbToolsProgramExitCode::FAILED;
+        }
+      }
 
       /* report to clusterlog if applicable */
       for (i = 0; i < g_consumers.size(); i++) {
@@ -2256,15 +2347,30 @@ int do_restore(RestoreThreadData *thrdata) {
     }
 
     if (_restore_data || _print_log || _print_sql_log) {
-      RestoreLogIterator logIter(metaData);
+      RestoreLogIterator logIter(metaData, &free_data_callback, (void *)thrdata,
+                                 opt_read_size);
+#ifdef ERROR_INSERT
+      if (_error_insert > 0) {
+        logIter.error_insert(_error_insert);
+      }
+#endif
 
       restoreLogger.log_info("[restore_log] Read log file header");
+
+      if (!logIter.openFile()) {
+        restoreLogger.log_error("Failed to open data file. Exiting...");
+        return NdbToolsProgramExitCode::FAILED;
+      }
+      Scope_guard close_log_file_on_error(CloseFileUnchecked{logIter});
 
       if (!logIter.readHeader()) {
         restoreLogger.log_error(
             "Failed to read header of data file. Exiting...");
         return NdbToolsProgramExitCode::FAILED;
       }
+
+      // Save snapshotstart to skip open log file again if restore epoch
+      snapshotstart = logIter.isSnapshotstartBackup();
 
       const LogEntry *logEntry = 0;
 
@@ -2284,6 +2390,9 @@ int do_restore(RestoreThreadData *thrdata) {
         }
 
         if (check_progress()) report_progress("Log file progress: ", logIter);
+        if (ga_error_thread > 0) {
+          return NdbToolsProgramExitCode::FAILED;
+        }
       }
       if (res < 0) {
         restoreLogger.log_error(
@@ -2291,7 +2400,22 @@ int do_restore(RestoreThreadData *thrdata) {
         return NdbToolsProgramExitCode::FAILED;
       }
       logIter.validateFooter();  // not implemented
-      for (i = 0; i < g_consumers.size(); i++) g_consumers[i]->endOfLogEntrys();
+
+      close_log_file_on_error.release();
+      logIter.closeFile(/* abort */ false);
+
+      {
+        bool consumersOk = true;
+        for (i = 0; i < g_consumers.size(); i++) {
+          consumersOk &= g_consumers[i]->endOfLogEntrys();
+        }
+
+        if (!consumersOk) {
+          restoreLogger.log_error(
+              "Restore: Error reading the data log. Exiting");
+          return NdbToolsProgramExitCode::FAILED;
+        }
+      }
 
       /* report to clusterlog if applicable */
       for (i = 0; i < g_consumers.size(); i++) {
@@ -2313,6 +2437,9 @@ int do_restore(RestoreThreadData *thrdata) {
             }
           }
         }
+        if (ga_error_thread > 0) {
+          return NdbToolsProgramExitCode::FAILED;
+        }
       }
     }
 
@@ -2331,6 +2458,9 @@ int do_restore(RestoreThreadData *thrdata) {
                 metaData[i]->getTableName());
             return NdbToolsProgramExitCode::FAILED;
           }
+        }
+        if (ga_error_thread > 0) {
+          return NdbToolsProgramExitCode::FAILED;
         }
       }
       if (ga_num_slices != 1) {
@@ -2374,13 +2504,37 @@ int do_restore(RestoreThreadData *thrdata) {
 
   if (ga_restore_epoch) {
     restoreLogger.log_info("[restore_epoch] Restoring epoch");
-    RestoreLogIterator logIter(metaData);
+    if (snapshotstart == -1) {
+      RestoreLogIterator logIter(metaData, &free_data_callback, (void *)thrdata,
+                                 opt_read_size);
+#ifdef ERROR_INSERT
+      if (_error_insert > 0) {
+        logIter.error_insert(_error_insert);
+      }
+#endif
 
-    if (!logIter.readHeader()) {
-      err << "Failed to read snapshot info from log file. Exiting..." << endl;
-      return NdbToolsProgramExitCode::FAILED;
+      if (!logIter.openFile()) {
+        restoreLogger.log_error("Failed to open data file. Exiting...");
+        return NdbToolsProgramExitCode::FAILED;
+      }
+      Scope_guard close_log_file_on_error(CloseFileUnchecked{logIter});
+
+      if (!logIter.readHeader()) {
+        err << "Failed to read snapshot info from log file. Exiting..." << endl;
+        return NdbToolsProgramExitCode::FAILED;
+      }
+      close_log_file_on_error.release();
+      /*
+       * Only header is read. Rest of file may be unread. And by that for
+       * example file checksum can not be checked at close. In many use cases
+       * the log file has been consumed and checked by an earlier ndb_restore
+       * run and we are sloppy here and skip the extra checks in close by using
+       * the abort variant of close.
+       */
+      logIter.closeFile(/* abort */ true);
+
+      snapshotstart = logIter.isSnapshotstartBackup();
     }
-    bool snapshotstart = logIter.isSnapshotstartBackup();
     for (i = 0; i < g_consumers.size(); i++)
       if (!g_consumers[i]->update_apply_status(metaData, snapshotstart)) {
         restoreLogger.log_error("Restore: Failed to restore epoch");
@@ -2415,12 +2569,15 @@ int do_restore(RestoreThreadData *thrdata) {
 
     for (i = 0; i < metaData.getNoOfTables(); i++) {
       const TableS *table = metaData[i];
-      if (!(checkSysTable(table) && checkDbAndTableName(table))) continue;
+      if (!rebuildSysTableIdx(table)) continue;
       if (isBlobTable(table) || isIndex(table)) continue;
       for (Uint32 j = 0; j < g_consumers.size(); j++) {
         if (!g_consumers[j]->rebuild_indexes(*table)) {
           return NdbToolsProgramExitCode::FAILED;
         }
+      }
+      if (ga_error_thread > 0) {
+        return NdbToolsProgramExitCode::FAILED;
       }
     }
     for (Uint32 j = 0; j < g_consumers.size(); j++) {
@@ -2488,7 +2645,7 @@ int detect_backup_format() {
       //      BACKUP-1-PART-1-OF-3 : not found, continue
       //      BACKUP-1-PART-1-OF-4 : FOUND, set ga_part_count and break
       BaseString::snprintf(
-          name, sz, "%s%sBACKUP-%d-PART-1-OF-%u%sBACKUP-%u.%d.ctl",
+          name, sz, "%s%sBACKUP-%u-PART-1-OF-%u%sBACKUP-%u.%d.ctl",
           ga_backupPath, DIR_SEPARATOR, ga_backupId, ga_part_count,
           DIR_SEPARATOR, ga_backupId, ga_nodeId);
       if (my_stat(name, &buf, 0)) {
@@ -2510,7 +2667,7 @@ static void *start_restore_worker(void *data) {
   RestoreThreadData *rdata = (RestoreThreadData *)data;
   rdata->m_result = do_restore(rdata);
   if (rdata->m_result == NdbToolsProgramExitCode::FAILED) {
-    info << "Thread " << rdata->m_part_id << " failed, exiting" << endl;
+    info.println("Thread %u failed, exiting", rdata->m_part_id);
     ga_error_thread = rdata->m_part_id;
   }
   return 0;
@@ -2566,6 +2723,7 @@ int main(int argc, char **argv) {
   if (ga_allow_pk_changes) g_options.append(" --allow-pk-changes");
   if (ga_ignore_extended_pk_updates)
     g_options.append(" --ignore-extended-pk-updates");
+  if (opt_skip_fk_checks) g_options.append(" --skip-fk-checks");
 
   // determine backup format: simple or multi-part, and count parts
   int result = detect_backup_format();
@@ -2591,11 +2749,46 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (ga_hint) {
+    /**
+     * User set hint option
+     *
+     * Check that node id from backup is data node + live
+     * on this cluster.
+     */
+    ga_hint = 0;
+    g_cluster_connection->wait_until_ready(30, 30);
+    Ndb_cluster_connection_node_iter node_iter;
+    g_cluster_connection->init_get_next_node(node_iter);
+    int live_node = 0;
+    while ((live_node = (int)g_cluster_connection->get_next_alive_node(
+                node_iter)) != 0) {
+      if (live_node == ga_nodeId) {
+        ga_hint = ga_nodeId;
+        break;
+      }
+    }
+    if (ga_hint) {
+      info << "Hinting transactions to node id " << ga_nodeId << endl;
+    } else {
+      info << "Unable to hint transactions to node id " << ga_nodeId << endl;
+    }
+  }
+
   g_restoring_in_parallel = true;
   // check if single-threaded restore is necessary
   if (_print || _print_meta || _print_data || _print_log || _print_sql_log ||
       ga_backup_format == BF_SINGLE) {
     g_restoring_in_parallel = false;
+    // Bound row parallelism between (1,MaxTransactionsPerThread)
+    if (ga_nParallelism > MaxTransactionsPerThread) {
+      info << "Requested parallelism " << ga_nParallelism << " limited to "
+           << MaxTransactionsPerThread << "." << endl;
+      ga_nParallelism = MaxTransactionsPerThread;
+    }
+    ga_nParallelism = std::max(ga_nParallelism, 1);
+    info << "Parallelism for single restore instance is " << ga_nParallelism
+         << endl;
     for (int i = 1; i <= ga_part_count; i++) {
       /*
        * do_restore uses its parameter 'partId' to select the backup part.
@@ -2652,10 +2845,19 @@ int main(int argc, char **argv) {
      * Divide data INSERT parallelism across parts, ensuring
      * each part has at least 1
      */
+    const int MaxProcessParallelism = ga_part_count * MaxTransactionsPerThread;
+    if (ga_nParallelism > MaxProcessParallelism) {
+      info << "Requested parallelism " << ga_nParallelism << " limited to "
+           << MaxProcessParallelism << "." << endl;
+      info << "Parameter upperbound is " << ga_part_count << " parts * "
+           << MaxTransactionsPerThread << " max parallelism per part" << endl;
+      ga_nParallelism = MaxProcessParallelism;
+    }
     ga_nParallelism /= ga_part_count;
-    if (ga_nParallelism == 0) ga_nParallelism = 1;
+    // Ensure at least 1 per thread
+    ga_nParallelism = std::max(ga_nParallelism, 1);
 
-    debug << "Part parallelism is " << ga_nParallelism << endl;
+    info << "Part parallelism is " << ga_nParallelism << endl;
 
     for (int part_id = 1; part_id <= ga_part_count; part_id++) {
       NDB_THREAD_PRIO prio = NDB_THREAD_PRIO_MEAN;

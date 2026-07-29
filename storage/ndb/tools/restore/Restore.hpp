@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,6 +49,8 @@
 #define NDB_RESTORE_ERROR_INSERT_SKIP_ROWS 2
 #define NDB_RESTORE_ERROR_INSERT_FAIL_REPLAY_LOG 3
 #define NDB_RESTORE_ERROR_INSERT_FAIL_RESTORE_TUPLE 4
+#define NDB_RESTORE_ERROR_INSERT_FAIL_LOG_CONSTRAINT 5
+#define NDB_RESTORE_ERROR_INSERT_ABORT_ON_CLOSE_ERROR 6
 
 #endif
 
@@ -347,6 +349,34 @@ class TableS {
 
 class RestoreLogIterator;
 
+/**
+ * BatchBuffer
+ * Buffer used to allocate space as needed for a batch
+ * of operations
+ * When the buffer is full, the batch should be executed,
+ * afterwards it can be grown if desired to avoid being
+ * a batchsize limitation
+ */
+class BatchBuffer {
+ public:
+  static constexpr Uint32 DEFAULT_SIZE = 8192;
+  BatchBuffer(Uint32 initialWordSize = DEFAULT_SIZE);
+  ~BatchBuffer();
+
+  bool hasSpaceForEntry(Uint32 wordSize) const;
+  Uint32 *getWordsPtr(Uint32 wordSize);
+  void reset();
+
+  void expand();
+
+ private:
+  void reAlloc(Uint32 newWordSize);
+
+  Uint32 totalWords;
+  Uint32 *allocationPtr;
+  Uint32 *nextWritePtr;
+};
+
 class BackupFile {
  protected:
   ndb_file m_file;
@@ -372,6 +402,8 @@ class BackupFile {
 
   UtilBuffer m_twiddle_buffer;
 
+  BatchBuffer m_extra_data_buffer;
+
   bool m_is_undolog;
   void (*free_data_callback)(void *);
   void *m_ctx;  // context for callback function
@@ -389,10 +421,12 @@ class BackupFile {
     if (free_data_callback) {
       (*free_data_callback)(m_ctx);
     }
+
+    m_extra_data_buffer.reset();
+
     reset_buffers();
   }
 
-  bool openFile();
   void setCtlFile(Uint32 nodeId, Uint32 backupId, const char *path);
   void setDataFile(const BackupFile &bf, Uint32 no);
   void setLogFile(const BackupFile &bf, Uint32 no);
@@ -404,10 +438,13 @@ class BackupFile {
 
   void setName(const char *path, const char *name);
 
-  BackupFile(void (*free_data_callback)(void *) = 0, void *ctx = 0);
+  BackupFile(void (*free_data_callback)(void *) = nullptr, void *ctx = nullptr,
+             Uint32 bufferSz = DEFAULT_BUFFER_SIZE);
   virtual ~BackupFile();
 
  public:
+  bool openFile();
+  bool closeFile(bool abort);
   bool readHeader();
   bool validateFooter();
   bool validateBackupFile();
@@ -432,11 +469,20 @@ class BackupFile {
 #ifdef ERROR_INSERT
   void error_insert(unsigned int code);
 #endif
-  static const Uint32 BUFFER_SIZE = 128 * 1024;
+  static const Uint32 DEFAULT_BUFFER_SIZE = 128 * 1024;
 
  private:
   void twiddle_atribute(const AttributeDesc *const attr_desc,
                         AttributeData *attr_data);
+};
+
+// Class to be used with Scope_guard
+class CloseFileUnchecked {
+  BackupFile &m_file;
+
+ public:
+  CloseFileUnchecked(BackupFile &file) : m_file(file) {}
+  void operator()() const { m_file.closeFile(true); }
 };
 
 struct DictObject {
@@ -493,13 +539,13 @@ class RestoreDataIterator : public BackupFile {
  public:
   // Constructor
   RestoreDataIterator(const RestoreMetaData &,
-                      void (*free_data_callback)(void *), void *);
+                      void (*free_data_callback)(void *), void *,
+                      Uint32 bufferSz);
   ~RestoreDataIterator() override;
 
   // Read data file fragment header
   bool readFragmentHeader(int &res, Uint32 *fragmentId);
   bool validateFragmentFooter();
-  bool validateRestoreDataIterator();
 
   const TupleS *getNextTuple(int &res, const bool skipFragment);
   TableS *getCurrentTable();
@@ -510,24 +556,16 @@ class RestoreDataIterator : public BackupFile {
    * consumers cannot read directly from the file buffer
    */
   void calc_row_extra_storage_words(const TableS *tableSpec);
-  void alloc_extra_storage(Uint32 words);
-  void free_extra_storage();
-  void reset_extra_storage();
+
   void check_extra_storage();
   Uint32 *get_extra_storage(Uint32 len);
-  Uint32 get_free_extra_storage() const;
 
   Uint32 m_row_max_extra_wordlen;
-  Uint32 *m_extra_storage_ptr;
-  Uint32 *m_extra_storage_curr_ptr;
-  Uint32 m_extra_storage_wordlen;
 
   /* Are there column transforms for the current table */
   bool m_current_table_has_transforms;
 
  protected:
-  void reset_buffers() override { reset_extra_storage(); }
-
   int readTupleData_old(Uint32 *buf_ptr, Uint32 dataLength);
   int readTupleData_packed(Uint32 *buf_ptr, Uint32 dataLength);
 
@@ -565,6 +603,7 @@ class LogEntry {
     for (i = 0; i < m_values.size(); i++) delete m_values[i];
     for (i = 0; i < m_values_e.size(); i++) delete m_values_e[i];
   }
+  LogEntry &operator=(const LogEntry &logEntry);
   Uint32 size() const { return m_values.size(); }
   const AttributeS *operator[](int i) const { return m_values[i]; }
   void printSqlLog() const;
@@ -575,7 +614,7 @@ class RestoreLogIterator : public BackupFile {
    * not including log entry header.
    * No harm in require space for a few extra words to header too.
    */
-  static_assert(BackupFile::BUFFER_SIZE >=
+  static_assert(BackupFile::DEFAULT_BUFFER_SIZE >=
                 BackupFormat::LogFile::LogEntry::MAX_SIZE);
 
  private:
@@ -586,12 +625,13 @@ class RestoreLogIterator : public BackupFile {
   LogEntry m_logEntry;
   static const Uint32 RowBuffWords =
       MAX_TUPLE_SIZE_IN_WORDS + MAX_ATTRIBUTES_IN_TABLE;
-  Uint32 m_rowBuff[RowBuffWords];
-  Uint32 m_rowBuffIndex;
 
  public:
-  RestoreLogIterator(const RestoreMetaData &);
+  RestoreLogIterator(const RestoreMetaData &,
+                     void (*free_data_callback)(void *), void *, Uint32);
   ~RestoreLogIterator() override {}
+
+  void check_extra_storage();
 
   bool isSnapshotstartBackup() { return m_is_undolog; }
   const LogEntry *getNextLogEntry(int &res);
@@ -603,16 +643,24 @@ class RestoreLogger {
   ~RestoreLogger();
   void log_info(const char *fmt, ...) ATTRIBUTE_FORMAT(printf, 2, 3);
   void log_debug(const char *fmt, ...) ATTRIBUTE_FORMAT(printf, 2, 3);
+  void log_warning(const char *fmt, ...) ATTRIBUTE_FORMAT(printf, 2, 3);
   void log_error(const char *fmt, ...) ATTRIBUTE_FORMAT(printf, 2, 3);
   void setThreadPrefix(const char *prefix);
   const char *getThreadPrefix() const;
+  void set_print_log_level(bool print_LL);
+  bool get_print_log_level() const;
   void set_print_timestamp(bool print_TS);
-  bool get_print_timestamp();
+  bool get_print_timestamp() const;
 
  private:
+  void vlog_ll(FilteredNdbOut &out, const char *ll, const char *fmt, va_list ap)
+      ATTRIBUTE_FORMAT(printf, 3, 0);
+
   NdbMutex *m_mutex;
   char timestamp[64];
+  // If both print_timestamp and print_log_level use g_eventLogger format
   bool print_timestamp;
+  bool print_log_level;
 };
 
 NdbOut &operator<<(NdbOut &ndbout, const TableS &);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2009, 2026, Oracle and/or its affiliates.
  
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License, version 2.0,
@@ -291,6 +291,7 @@
 #cmakedefine DISABLE_PSI_MEMORY 1
 #cmakedefine DISABLE_PSI_TRANSACTION 1
 #cmakedefine DISABLE_PSI_SERVER_TELEMETRY_TRACES 1
+#cmakedefine DISABLE_PSI_SERVER_TELEMETRY_LOGS 1
 #cmakedefine DISABLE_PSI_METRICS 1
 
 /*
@@ -315,7 +316,6 @@
  * NDB
  */
 #cmakedefine HAVE_GETRLIMIT 1
-#cmakedefine WITH_NDBCLUSTER_STORAGE_ENGINE 1
 #cmakedefine HAVE_PTHREAD_SETSCHEDPARAM 1
 
 /*

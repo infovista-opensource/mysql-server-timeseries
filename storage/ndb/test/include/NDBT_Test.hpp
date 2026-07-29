@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -28,6 +28,7 @@
 
 #include <kernel/ndb_limits.h>
 #include <ndb_global.h>
+#include <memory>
 
 #include <NdbCondition.h>
 #include <NdbSleep.h>
@@ -41,6 +42,7 @@
 #include "../../src/ndbapi/ndb_cluster_connection_impl.hpp"
 #include "NDBT_ReturnCodes.h"
 #include "NdbRestarter.hpp"
+#include "util/ndb_barrier.h"
 
 class NDBT_Step;
 class NDBT_TestCase;
@@ -80,8 +82,8 @@ class NDBT_Context {
   void wait_timeout(int msec);
 
   // Wait until the property has been set to a certain value
-  bool getPropertyWait(const char *, Uint32);
-  const char *getPropertyWait(const char *, const char *);
+  bool getPropertyWait(const char *, Uint32 val);  // returns false on success
+  const char *getPropertyWait(const char *, const char *val);  // returns value
 
   void decProperty(const char *);
   void incProperty(const char *);
@@ -129,6 +131,8 @@ class NDBT_Context {
   static void getRecordSubRange(int records, int rangeCount, int rangeId,
                                 int &startRecord, int &stopRecord);
 
+  ndb::barrier *getStepsBarrierPtr();
+
  private:
   friend class NDBT_Step;
   friend class NDBT_TestSuite;
@@ -151,6 +155,8 @@ class NDBT_Context {
 
   int m_env_timeout;
   const Uint64 m_test_start_time;
+
+  std::unique_ptr<ndb::barrier> steps_barrier;
 };
 
 typedef int(NDBT_TESTFUNC)(NDBT_Context *, NDBT_Step *);
@@ -464,20 +470,15 @@ class NDBT_TestSuite {
   bool m_checkErrorInsert;
 };
 
-#define NDBT_TESTSUITE(suitname)                \
-  class C##suitname : public NDBT_TestSuite {   \
-   public:                                      \
-    C##suitname() : NDBT_TestSuite(#suitname) { \
-      NDBT_TestCaseImpl1 *pt;                   \
-      pt = NULL;                                \
-      NDBT_Step *pts;                           \
-      pts = NULL;                               \
-      NDBT_Verifier *ptv;                       \
-      ptv = NULL;                               \
-      NDBT_Initializer *pti;                    \
-      pti = NULL;                               \
-      NDBT_Finalizer *ptf;                      \
-      ptf = NULL;
+#define NDBT_TESTSUITE(suitname)                        \
+  class C##suitname : public NDBT_TestSuite {           \
+   public:                                              \
+    C##suitname() : NDBT_TestSuite(#suitname) {         \
+      NDBT_TestCaseImpl1 *pt = nullptr;                 \
+      [[maybe_unused]] NDBT_Step *pts = nullptr;        \
+      [[maybe_unused]] NDBT_Verifier *ptv = nullptr;    \
+      [[maybe_unused]] NDBT_Initializer *pti = nullptr; \
+      [[maybe_unused]] NDBT_Finalizer *ptf = nullptr;
 
 // The default driver type to use for all tests in suite
 #define DRIVER(type) setDriverType(type)

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -50,6 +50,7 @@
 #include "NdbSpin.h"
 #include "OutputStream.hpp"
 #include "portlib/NdbTCP.h"
+#include "portlib/NdbTick.h"
 
 #include <mgmapi/mgmapi.h>
 #include <mgmapi/mgmapi_debug.h>
@@ -102,6 +103,10 @@ ndb_sockaddr TransporterRegistry::get_connect_address_node(
 }
 ndb_sockaddr TransporterRegistry::get_connect_address(TrpId trpId) const {
   return allTransporters[trpId]->m_connect_address;
+}
+
+bool TransporterRegistry::trpIdIsValid(TrpId id) const {
+  return (allTransporters[id] != nullptr);
 }
 
 Uint64 TransporterRegistry::get_bytes_sent(TrpId trpId) const {
@@ -218,7 +223,6 @@ bool TransporterReceiveData::epoll_add(Transporter *t [[maybe_unused]]) {
 
 #if defined(HAVE_EPOLL_CREATE)
   if (m_epoll_fd != -1) {
-    bool add = true;
     struct epoll_event event_poll;
     memset(&event_poll, 0, sizeof(event_poll));
     ndb_socket_t sock_fd = t->getSocket();
@@ -233,32 +237,23 @@ bool TransporterReceiveData::epoll_add(Transporter *t [[maybe_unused]]) {
         epoll_ctl(m_epoll_fd, op, ndb_socket_get_native(sock_fd), &event_poll);
     if (likely(!ret_val)) goto ok;
     error = errno;
-    if (error == ENOENT && !add) {
-      /*
-       * Could be that socket was closed premature to this call.
-       * Not a problem that this occurs.
-       */
-      goto ok;
-    }
     const int node_id = t->getRemoteNodeId();
-    if (!add || (add && (error != ENOMEM))) {
+    if (error != ENOMEM) {
       /*
        * Serious problems, we are either using wrong parameters,
        * have permission problems or the socket doesn't support
        * epoll!!
        */
       g_eventLogger->info(
-          "Failed to %s epollfd: %u fd: %d "
-          " transporter id:%u -> node %u to epoll-set,"
-          " errno: %u %s",
-          add ? "ADD" : "DEL", m_epoll_fd, ndb_socket_get_native(sock_fd),
-          trp_id, node_id, error, strerror(error));
+          "Node %u transporter to node %u (id %u): failed to ADD epollfd %u fd "
+          "%d, errno: %u %s",
+          t->getLocalNodeId(), node_id, trp_id, m_epoll_fd,
+          ndb_socket_get_native(sock_fd), error, strerror(error));
       abort();
     }
     g_eventLogger->info(
-        "We lacked memory to add the socket for "
-        "transporter id:%u -> node id %u",
-        trp_id, node_id);
+        "Node %u transporter to node %u (id %u): lacked memory to add socket",
+        t->getLocalNodeId(), node_id, trp_id);
     return false;
   }
 
@@ -930,8 +925,7 @@ SendStatus TransporterRegistry::prepareSendTemplate(
   const TrpId trp_id = t->getTransporterIndex();
 
   if (likely(!(ioStates[trp_id] & HaltOutput)) ||
-      (signalHeader->theReceiversBlockNumber == QMGR) ||
-      (signalHeader->theReceiversBlockNumber == API_CLUSTERMGR)) {
+      is_permitted_halt_signal(signalHeader)) {
     if (likely(sendHandle->isSendEnabled(trp_id))) {
       const Uint32 lenBytes =
           t->m_packer.getMessageLength(signalHeader, section.m_ptr);
@@ -1695,6 +1689,7 @@ Uint32 TransporterRegistry::performReceive(TransporterReceiveHandle &recvdata,
    * bytes. The m_has_data_transporters bitmap was set already in
    * pollReceive for SHM transporters.
    */
+  NDB_TICKS last_recv = NdbTick_getCurrentTicks();
   for (Uint32 trp_id = recvdata.m_recv_transporters.find_first();
        trp_id != BitmaskImpl::NotFound;
        trp_id = recvdata.m_recv_transporters.find_next(trp_id + 1)) {
@@ -1727,7 +1722,8 @@ Uint32 TransporterRegistry::performReceive(TransporterReceiveHandle &recvdata,
 #endif
         int nBytes = t->doReceive(recvdata);
         if (nBytes > 0) {
-          recvdata.transporter_recv_from(node_id);
+          t->set_last_recv(last_recv);
+          recvdata.transporter_recv_from(node_id, trp_id);
           recvdata.m_has_data_transporters.set(trp_id);
         }
         more_pending = t->hasPending();
@@ -1816,7 +1812,8 @@ Uint32 TransporterRegistry::performReceive(TransporterReceiveHandle &recvdata,
         SHM_Transporter *t_shm = (SHM_Transporter *)t;
         Uint32 *readPtr, *eodPtr, *endPtr;
         t_shm->getReceivePtr(&readPtr, &eodPtr, &endPtr);
-        recvdata.transporter_recv_from(node_id);
+        t->set_last_recv(last_recv);
+        recvdata.transporter_recv_from(node_id, trp_id);
         Uint32 *newPtr = unpack(recvdata, readPtr, eodPtr, endPtr, node_id,
                                 trp_id, stopReceiving);
         t_shm->updateReceivePtr(recvdata, newPtr);
@@ -2079,6 +2076,7 @@ void TransporterRegistry::start_connecting(TrpId trp_id) {
   DBUG_PRINT("info", ("performStates[trp:%u]=CONNECTING", trp_id));
 
   Transporter *t = allTransporters[trp_id];
+  require(t != nullptr);
   t->resetBuffers();
   m_error_states[trp_id].m_code = TE_NO_ERROR;
   m_error_states[trp_id].m_info = (const char *)~(UintPtr)0;
@@ -2103,6 +2101,7 @@ bool TransporterRegistry::start_disconnecting(TrpId trp_id, int errnum,
                                               bool send_source) {
   DEBUG_FPRINTF((stderr, "(%u)REG:start_disconnecting(trp:%u, %d)\n",
                  localNodeId, trp_id, errnum));
+  const char *previous_state_note = "";
   switch (performStates[trp_id]) {
     case DISCONNECTED: {
       return true;
@@ -2112,8 +2111,9 @@ bool TransporterRegistry::start_disconnecting(TrpId trp_id, int errnum,
     }
     case CONNECTING:
       /**
-       * This is a correct transition if a failure happen while connecting.
+       * This is a correct transition if a failure happens while connecting.
        */
+      previous_state_note = "(was connecting)";
       break;
     case DISCONNECTING: {
       return true;
@@ -2124,23 +2124,23 @@ bool TransporterRegistry::start_disconnecting(TrpId trp_id, int errnum,
     if (m_disconnect_enomem_error[trp_id] < 10) {
       NdbSleep_MilliSleep(40);
       g_eventLogger->info(
-          "Socket error %d on transporter %u to node %u"
-          " in state: %u",
-          errnum, trp_id, allTransporters[trp_id]->getRemoteNodeId(),
-          performStates[trp_id]);
+          "Node %u socket error %d on transporter to node %u (id %u) %s",
+          localNodeId, errnum, allTransporters[trp_id]->getRemoteNodeId(),
+          trp_id, previous_state_note);
       return false;
     }
   }
   if (errnum == 0) {
-    g_eventLogger->info("Transporter %u to node %u disconnected in state: %u",
-                        trp_id, allTransporters[trp_id]->getRemoteNodeId(),
-                        performStates[trp_id]);
+    g_eventLogger->info(
+        "Node %u transporter to node %u (id %u) disconnected %s", localNodeId,
+        allTransporters[trp_id]->getRemoteNodeId(), trp_id,
+        previous_state_note);
   } else {
     g_eventLogger->info(
-        "Transporter %u to node %u disconnected in %s"
-        " with errnum: %d in state: %u",
-        trp_id, allTransporters[trp_id]->getRemoteNodeId(),
-        send_source ? "send" : "recv", errnum, performStates[trp_id]);
+        "Node %u transporter to node %u (id %u) disconnected in %s"
+        " with errnum: %d %s",
+        localNodeId, allTransporters[trp_id]->getRemoteNodeId(), trp_id,
+        send_source ? "send" : "recv", errnum, previous_state_note);
   }
   DBUG_ENTER("TransporterRegistry::start_disconnecting");
   DBUG_PRINT("info", ("performStates[trp:%u]=DISCONNECTING", trp_id));
@@ -3243,8 +3243,8 @@ NdbSocket TransporterRegistry::connect_ndb_mgmd(NdbMgmHandle *h) {
   DBUG_PRINT("info", ("Converting handle to transporter"));
   NdbSocket socket = ndb_mgm_convert_to_transporter(h);
   if (!socket.is_valid()) {
-    g_eventLogger->error("Failed to convert to transporter (%s: %d)", __FILE__,
-                         __LINE__);
+    g_eventLogger->error("Node %u failed to convert to transporter (%s: %d)",
+                         localNodeId, __FILE__, __LINE__);
     ndb_mgm_destroy_handle(h);
   }
   DBUG_RETURN(socket);
@@ -3418,6 +3418,18 @@ Uint64 TransporterRegistry::get_send_buffer_max_used_bytes(TrpId trpId) const {
   return allTransporters[trpId]->get_max_used_bytes();
 }
 
+NDB_TICKS TransporterRegistry::get_last_recv(TrpId trpId) const {
+  assert(trpId < MAX_NTRANSPORTERS);
+  assert(allTransporters[trpId] != nullptr);
+  return allTransporters[trpId]->get_last_recv();
+}
+
+void TransporterRegistry::set_last_recv(TrpId trpId, NDB_TICKS last_recv) {
+  assert(trpId < MAX_NTRANSPORTERS);
+  assert(allTransporters[trpId] != nullptr);
+  allTransporters[trpId]->set_last_recv(last_recv);
+}
+
 void TransporterRegistry::get_trps_for_node(NodeId nodeId, TrpId *trp_ids,
                                             Uint32 &num_ids,
                                             Uint32 max_size) const {
@@ -3452,6 +3464,21 @@ TrpId TransporterRegistry::get_the_only_base_trp(NodeId nodeId) const {
   if (num_ids == 0) return 0;
   require(num_ids == 1);
   return trp_ids[0];
+}
+
+TrpId TransporterRegistry::get_recv_trp(BlockReference recvRef,
+                                        BlockReference sendRef) const {
+  Transporter *t;
+  NodeId sendNode = refToNode(sendRef);
+  Multi_Transporter *multi_trp = get_node_multi_transporter(sendNode);
+  if (multi_trp != nullptr) {
+    t = multi_trp->get_recv_transporter(refToBlock(recvRef),
+                                        refToBlock(sendRef));
+  } else {
+    t = get_node_transporter(sendNode);
+  }
+  if (t == nullptr) return 0;
+  return t->getTransporterIndex();
 }
 
 void TransporterRegistry::switch_active_trp(Multi_Transporter *t) {
@@ -3519,6 +3546,21 @@ void calculate_send_buffer_level(Uint64 node_send_buffer_size,
     level = SB_CRITICAL_LEVEL;
     return;
   }
+}
+
+bool TransporterRegistry::is_permitted_halt_signal(
+    const SignalHeader *signalHeader) {
+  /**
+   * LowLevel signals are permitted in HaltInput or HaltOutput
+   * states, and must be directly between QMGR + API_CLUSTERMGR
+   * blocks only
+   */
+  return (  // receiverLowLevel
+      ((signalHeader->theReceiversBlockNumber == QMGR) ||
+       (signalHeader->theReceiversBlockNumber == API_CLUSTERMGR)) &&
+      (  // senderLowLevel
+          ((signalHeader->theSendersBlockRef == QMGR) ||
+           (signalHeader->theSendersBlockRef == API_CLUSTERMGR))));
 }
 
 template class Vector<TransporterRegistry::Transporter_interface>;

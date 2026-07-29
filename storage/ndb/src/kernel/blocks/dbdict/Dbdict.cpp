@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -354,9 +354,131 @@ void Dbdict::execDUMP_STATE_ORD(Signal *signal) {
     RSS_AP_SNAPSHOT_CHECK(g_hash_map);
   }
 
+  if (signal->theData[0] == DumpStateOrd::LogNodeFailProgress) {
+    jam();
+    if (c_schemaTransCount > 0) {
+      /* Dump schema transactions */
+      signal->theData[0] = DumpStateOrd::DictDumpSchemaTransactions;
+      execDUMP_STATE_ORD(signal);
+    }
+    return;
+  }
+
+  if (signal->theData[0] == DumpStateOrd::DictDumpSchemaTransactions) {
+    jam();
+
+    g_eventLogger->info("SchemaTransaction state begin");
+    if (c_schemaTransCount > 0) {
+      SchemaTransPtr trans_ptr;
+      c_schemaTransList.first(trans_ptr);
+      while (trans_ptr.i != RNIL) {
+        dumpSchemaTransaction(trans_ptr);
+
+        c_schemaTransList.next(trans_ptr);
+      }
+    }
+    g_eventLogger->info("SchemaTransaction state end");
+    return;
+  }
   return;
 
 }  // Dbdict::execDUMP_STATE_ORD()
+
+void Dbdict::dumpSchemaTransaction(SchemaTransPtr trans_ptr) {
+  g_eventLogger->info(
+      "Master node %u c_takeoverInProgress %u transaction count %u",
+      c_masterNodeId, c_takeOverInProgress, c_schemaTransCount);
+
+  g_eventLogger->info(
+      "Trans ptr %u state %u key %u clientRef 0x%x transId %u clientState %u "
+      "clientFlags %x",
+      trans_ptr.i, trans_ptr.p->m_state, trans_ptr.p->trans_key,
+      trans_ptr.p->m_clientRef, trans_ptr.p->m_transId,
+      trans_ptr.p->m_clientState, trans_ptr.p->m_clientFlags);
+  {
+    static constexpr Uint32 bitmaskTextLen = NdbNodeBitmask::TextLength + 1;
+    char b1[bitmaskTextLen];
+    char b2[bitmaskTextLen];
+    char b3[bitmaskTextLen];
+    trans_ptr.p->m_nodes.getText(b1);
+    {
+      SafeCounter sc(c_reservedCounterMgr, trans_ptr.p->m_counter);
+      sc.getText(b2);
+    }
+    trans_ptr.p->m_ref_nodes.getText(b3);
+    g_eventLogger->info("Trans nodes %s waiting for %s  ref nodes %s", b1, b2,
+                        b3);
+  }
+  g_eventLogger->info(
+      "Error info : code %u line %u node %u count %u status %u key %u object "
+      "%s",
+      trans_ptr.p->m_error.errorCode, trans_ptr.p->m_error.errorLine,
+      trans_ptr.p->m_error.errorNodeId, trans_ptr.p->m_error.errorCount,
+      trans_ptr.p->m_error.errorStatus, trans_ptr.p->m_error.errorKey,
+      trans_ptr.p->m_error.errorObjectName);
+  g_eventLogger->info(
+      "Flags : flush_prepare %u flush_commit %u flush_complete %u flush_end %u",
+      trans_ptr.p->m_flush_prepare, trans_ptr.p->m_flush_commit,
+      trans_ptr.p->m_flush_complete, trans_ptr.p->m_flush_end);
+  g_eventLogger->info(
+      "Flags : wait_gcp_on_commit %u  abort_on_node_fail_pre_commit %u",
+      trans_ptr.p->m_wait_gcp_on_commit,
+      trans_ptr.p->m_abort_on_node_fail_pre_commit);
+  g_eventLogger->info(
+      "Master recovery state %u  rf_op %u rf_op_state %u rb_op %u rb_op_state "
+      "%u",
+      trans_ptr.p->m_master_recovery_state, trans_ptr.p->m_rollforward_op,
+      trans_ptr.p->m_rollforward_op_state, trans_ptr.p->m_rollback_op,
+      trans_ptr.p->m_rollback_op_state);
+  g_eventLogger->info(
+      "Lowest trans state %u Highest trans state %u check_partial_rf %u "
+      "resurrected_op %u",
+      trans_ptr.p->m_lowest_trans_state, trans_ptr.p->m_highest_trans_state,
+      trans_ptr.p->check_partial_rollforward, trans_ptr.p->ressurected_op);
+
+  {
+    LocalSchemaOp_list list(c_schemaOpPool, trans_ptr.p->m_op_list);
+    SchemaOpPtr schemaOp;
+    list.first(schemaOp);
+
+    g_eventLogger->info("Schema operation list start");
+
+    while (!schemaOp.isNull()) {
+      g_eventLogger->info(
+          "- Schema op ptr %u state %u key %u base_op_ptr_i %u restart %u",
+          schemaOp.i, schemaOp.p->m_state, schemaOp.p->op_key,
+          schemaOp.p->m_base_op_ptr_i, schemaOp.p->m_restart);
+      const OpInfo &opInfo = getOpInfo(schemaOp);
+      g_eventLogger->info(
+          "  Schema op client ref 0x%x data %u reqInfo %x opType %s helper out "
+          "%u back %u",
+          schemaOp.p->m_clientRef, schemaOp.p->m_clientData,
+          schemaOp.p->m_requestInfo, opInfo.m_opType, schemaOp.p->m_oplnk_ptr.i,
+          schemaOp.p->m_opbck_ptr.i);
+      g_eventLogger->info(
+          "  Schema op error info : code %u line %u node %u count %u status %u "
+          "key %u object %s",
+          schemaOp.p->m_error.errorCode, schemaOp.p->m_error.errorLine,
+          schemaOp.p->m_error.errorNodeId, schemaOp.p->m_error.errorCount,
+          schemaOp.p->m_error.errorStatus, schemaOp.p->m_error.errorKey,
+          schemaOp.p->m_error.errorObjectName);
+      if (hasDictObject(schemaOp)) {
+        DictObjectPtr dictObjPtr;
+        getDictObject(schemaOp, dictObjPtr);
+        char nameBuff[MAX_TAB_NAME_SIZE];
+        {
+          LocalRope name(c_rope_pool, dictObjPtr.p->m_name);
+          name.copy(nameBuff);
+        }
+        g_eventLogger->info("  DictObject id %u type %u i %u name %s",
+                            dictObjPtr.p->m_id, dictObjPtr.p->m_type,
+                            dictObjPtr.p->m_object_ptr_i, nameBuff);
+      }
+      list.next(schemaOp);
+    }
+    g_eventLogger->info("Schema operation list end");
+  }
+}
 
 void Dbdict::execDBINFO_SCANREQ(Signal *signal) {
   DbinfoScanReq req = *(DbinfoScanReq *)signal->theData;
@@ -4874,6 +4996,8 @@ void Dbdict::restartCreateObj_parse(Signal *signal, SegmentedSectionPtr ptr,
   }
   ndbrequire(!hasError(error));
 
+  op_ptr.p->m_state = SchemaOp::OS_PARSED;
+
   /* For table objects create triggers for fully replicated, maybe */
   if (memcmp(info.m_opType, "CTa", 4) == 0)
     createSubOps(signal, op_ptr);
@@ -4960,6 +5084,8 @@ void Dbdict::restartDropObj(Signal *signal, Uint32 tableId,
   }
   ndbrequire(!hasError(error));
 
+  op_ptr.p->m_state = SchemaOp::OS_PARSED;
+
   restart_nextOp(signal);
 }
 
@@ -4989,6 +5115,15 @@ void Dbdict::execAPI_FAILREQ(Signal *signal) {
   jamEntry();
   Uint32 failedApiNode = signal->theData[0];
   BlockReference retRef = signal->theData[1];
+
+  if (ERROR_INSERTED(6227)) {
+    jam();
+    g_eventLogger->info("Delaying failure handling of node %u for 5 seconds",
+                        failedApiNode);
+    sendSignalWithDelay(reference(), GSN_API_FAILREQ, signal, 5000,
+                        signal->getLength());
+    return;
+  }
 
   ndbrequire(retRef == QMGR_REF);  // As callback hard-codes QMGR_REF
 #if 0
@@ -17250,6 +17385,14 @@ void Dbdict::execSUB_START_REQ(Signal *signal) {
   jamEntry();
   D("execSUB_START_REQ");
 
+  if (ERROR_INSERTED(6228)) {
+    jam();
+    /* Simulate upgrade, with shorter signal + junk in 'requestInfo' part */
+    SubStartReq *req = (SubStartReq *)signal->getDataPtr();
+    req->requestInfo = 0xffffffff;
+    signal->setLength(SubStartReq::SignalLengthWithoutRequestInfo);
+  }
+
   Uint32 origSenderRef = signal->senderBlockRef();
 
   if (refToBlock(origSenderRef) != DBDICT && getOwnNodeId() != c_masterNodeId) {
@@ -17343,6 +17486,7 @@ void Dbdict::execSUB_START_REQ(Signal *signal) {
 
     req->senderRef = reference();
     req->senderData = subbPtr.i;
+    req->requestInfo = subbPtr.p->m_requestInfo;
 
 #ifdef EVENT_PH3_DEBUG
     g_eventLogger->info(
@@ -17377,6 +17521,7 @@ void Dbdict::execSUB_START_REQ(Signal *signal) {
 
     req->senderRef = reference();
     req->senderData = subbPtr.i;
+    req->requestInfo = subbPtr.p->m_requestInfo;
 
 #ifdef EVENT_PH3_DEBUG
     g_eventLogger->info(
@@ -17554,6 +17699,19 @@ void Dbdict::completeSubStartReq(Signal *signal, Uint32 ptrI,
   g_eventLogger->info("SUB_START_CONF");
 #endif
 
+  /* Determine latest epoch, every epoch after this will be consistently
+   * delivered by this subscription.
+   */
+  Uint32 gciHi = 0;
+  Uint32 gciLo = 0;
+
+  signal->theData[0] = 0;  // user ptr
+  signal->theData[1] = 0;  // Execute direct
+  signal->theData[2] = 2;  // Latest
+  EXECUTE_DIRECT(DBDIH, GSN_GETGCIREQ, signal, 3);
+  gciHi = signal->theData[1];
+  gciLo = signal->theData[2];
+
   ndbrequire(c_outstanding_sub_startstop);
   c_outstanding_sub_startstop--;
   SubStartConf *conf = (SubStartConf *)signal->getDataPtrSend();
@@ -17563,6 +17721,10 @@ void Dbdict::completeSubStartReq(Signal *signal, Uint32 ptrI,
   for (Uint32 i = 0; i < ARRAY_SIZE(subbPtr.p->m_buckets_per_ng); i++)
     cnt += subbPtr.p->m_buckets_per_ng[i];
   conf->bucketCount = cnt;
+
+  /* Ignore SUMA's firstGCI, send latest current GCI obtained above to API */
+  conf->firstGCIhi = gciHi;
+  conf->firstGCIlo = gciLo;
 
   sendSignal(subbPtr.p->m_senderRef, GSN_SUB_START_CONF, signal,
              SubStartConf::SignalLength, JBB);
@@ -24827,19 +24989,16 @@ void Dbdict::createFK_toCreateTrigger(Signal *signal, SchemaOpPtr op_ptr) {
       g_fkTriggerTmpl[createFKPtr.p->m_sub_create_trigger];
 
   Uint32 tableId = RNIL;
-  Uint32 indexId = RNIL;
   Uint32 triggerId = RNIL;
   Uint32 triggerNo = RNIL;
   switch (createFKPtr.p->m_sub_create_trigger) {
     case 0:
       tableId = fk_ptr.p->m_parentTableId;
-      indexId = fk_ptr.p->m_parentIndexId;
       triggerId = fk_ptr.p->m_parentTriggerId;
       triggerNo = 0;
       break;
     case 1:
       tableId = fk_ptr.p->m_childTableId;
-      indexId = fk_ptr.p->m_childIndexId;
       triggerId = fk_ptr.p->m_childTriggerId;
       triggerNo = 1;
       break;
@@ -25942,12 +26101,11 @@ void Dbdict::dropFK_fromLocal(Signal *signal, Uint32 op_key, Uint32 ret) {
 void Dbdict::dropFK_commit(Signal *signal, SchemaOpPtr op_ptr) {
   D("dropFK_commit");
   jam();
-  SchemaTransPtr trans_ptr = op_ptr.p->m_trans_ptr;
   DropFKRecPtr dropFKRecPtr;
   getOpRec(op_ptr, dropFKRecPtr);
   DropFKImplReq *impl_req = &dropFKRecPtr.p->m_request;
   impl_req->requestType = DropFKImplReq::RT_COMMIT;
-  sendTransConf(signal, trans_ptr);
+  sendTransConf(signal, op_ptr);
 }
 
 void Dbdict::send_drop_fk_req(Signal *signal, SchemaOpPtr op_ptr) {
@@ -29208,7 +29366,7 @@ void Dbdict::slave_run_start(Signal *signal, const SchemaTransImplReq *req) {
   trans_ptr.p->m_obj_id = objId;
   trans_log(trans_ptr);
 
-  sendTransConf(signal, trans_ptr);
+  sendTransConfImpl(signal, trans_ptr);
   return;
 
 err:
@@ -29218,7 +29376,7 @@ err:
   trans_ptr.p->trans_key = trans_key;
   trans_ptr.p->m_masterRef = req->senderRef;
   setError(trans_ptr.p->m_error, error);
-  sendTransRef(signal, trans_ptr);
+  sendTransRefImpl(signal, trans_ptr);
 }
 
 void Dbdict::slave_run_parse(Signal *signal, SchemaTransPtr trans_ptr,
@@ -29277,7 +29435,7 @@ void Dbdict::slave_run_parse(Signal *signal, SchemaTransPtr trans_ptr,
   if (hasError(error)) {
     jam();
     setError(trans_ptr, error);
-    sendTransRef(signal, trans_ptr);
+    sendTransRefImpl(signal, trans_ptr);
     return;
   }
   sendTransConf(signal, op_ptr);
@@ -29379,7 +29537,6 @@ void Dbdict::slave_writeSchema_conf(Signal *signal, Uint32 trans_key,
   SchemaTransPtr trans_ptr;
   ndbrequire(findSchemaTrans(trans_ptr, trans_key));
 
-  bool release = false;
   if (!trans_ptr.p->m_isMaster) {
     switch (trans_ptr.p->m_state) {
       case SchemaTrans::TS_FLUSH_PREPARE:
@@ -29409,7 +29566,6 @@ void Dbdict::slave_writeSchema_conf(Signal *signal, Uint32 trans_key,
       }
       case SchemaTrans::TS_ENDING:
         jam();
-        release = true;
         break;
       default:
         jamLine(trans_ptr.p->m_state);
@@ -29450,7 +29606,7 @@ void Dbdict::slave_commit_mutex_unlocked(Signal *signal, Uint32 transPtrI,
 
 void Dbdict::sendTransConfRelease(Signal *signal, SchemaTransPtr trans_ptr) {
   jam();
-  sendTransConf(signal, trans_ptr);
+  sendTransConfImpl(signal, trans_ptr);
 
   if ((!trans_ptr.p->m_isMaster) &&
       trans_ptr.p->m_state == SchemaTrans::TS_ENDING) {
@@ -29495,6 +29651,14 @@ void Dbdict::update_op_state(SchemaOpPtr op_ptr) {
     case SchemaOp::OS_COMPLETING:
       jam();
       op_ptr.p->m_state = SchemaOp::OS_COMPLETED;
+      if (!op_ptr.p->m_opbck_ptr.isNull()) {
+        jam();
+        /* We are a linked helper operation, update state of
+         * buddy op defined in transaction
+         */
+        ndbrequire(op_ptr.p->m_opbck_ptr.p->m_state == SchemaOp::OS_COMPLETING);
+        op_ptr.p->m_opbck_ptr.p->m_state = SchemaOp::OS_COMPLETED;
+      }
       break;
     case SchemaOp::OS_COMPLETED:
       ndbabort();
@@ -29505,10 +29669,11 @@ void Dbdict::sendTransConf(Signal *signal, SchemaOpPtr op_ptr) {
   jam();
   SchemaTransPtr trans_ptr = op_ptr.p->m_trans_ptr;
   update_op_state(op_ptr);
-  sendTransConf(signal, trans_ptr);
+  validateSchemaTransaction(trans_ptr);
+  sendTransConfImpl(signal, trans_ptr);
 }
 
-void Dbdict::sendTransConf(Signal *signal, SchemaTransPtr trans_ptr) {
+void Dbdict::sendTransConfImpl(Signal *signal, SchemaTransPtr trans_ptr) {
   ndbrequire(!trans_ptr.isNull());
   ndbrequire(signal->getNoOfSections() == 0);
 
@@ -29545,10 +29710,12 @@ void Dbdict::sendTransRef(Signal *signal, SchemaOpPtr op_ptr) {
 
   update_op_state(op_ptr);
 
-  sendTransRef(signal, trans_ptr);
+  validateSchemaTransaction(trans_ptr);
+
+  sendTransRefImpl(signal, trans_ptr);
 }
 
-void Dbdict::sendTransRef(Signal *signal, SchemaTransPtr trans_ptr) {
+void Dbdict::sendTransRefImpl(Signal *signal, SchemaTransPtr trans_ptr) {
   D("sendTransRef");
   ndbrequire(hasError(trans_ptr.p->m_error));
 
@@ -30239,6 +30406,51 @@ bool Dbdict::findCallback(Callback &callback, Uint32 any_key) {
   callback.m_callbackFunction = 0;
   callback.m_callbackData = 0;
   return false;
+}
+
+void Dbdict::validateSchemaTransaction(SchemaTransPtr schemaTransPtr) {
+  /* Check that schema transaction state + operation list
+   * state conform to invariants
+   */
+
+  /* To begin with, require that operation list states
+   * are strictly ascending.
+   * e.g. if we have n ops in the transaction, the states
+   * should advance in an orderly way as the transaction
+   * rolls forward or back.
+   */
+  bool ok = true;
+  Uint32 minOpState = SchemaOp::OS_COMPLETED;
+  {
+    LocalSchemaOp_list list(c_schemaOpPool, schemaTransPtr.p->m_op_list);
+    SchemaOpPtr schemaOp;
+    list.first(schemaOp);
+
+    while (!schemaOp.isNull()) {
+      if (likely(SchemaOp::weight(schemaOp.p->m_state) <=
+                 SchemaOp::weight(minOpState))) {
+        jam();
+        minOpState = schemaOp.p->m_state;
+      } else {
+        jam();
+        g_eventLogger->error(
+            "Dbdict::validateSchemaTransction operation state "
+            "invariant broken at op %u as weight(%u) > weight(%u) (%u>%u)",
+            schemaOp.i, schemaOp.p->m_state, minOpState,
+            SchemaOp::weight(schemaOp.p->m_state),
+            SchemaOp::weight(minOpState));
+        ok = false;
+      }
+
+      list.next(schemaOp);
+    }
+  }
+
+  if (unlikely(!ok)) {
+    g_eventLogger->error("Dbdict::validateSchemaTransaction() failure");
+    dumpSchemaTransaction(schemaTransPtr);
+    ndbabort();
+  }
 }
 
 // MODULE: CreateHashMap
@@ -31134,12 +31346,8 @@ void Dbdict::check_consistency_index(TableRecordPtr indexPtr) {
   ndbrequire(ok);
   check_consistency_table(tablePtr);
 
-  bool is_unique_index = false;
   switch (indexPtr.p->tableType) {
     case DictTabInfo::UniqueHashIndex:
-      jam();
-      is_unique_index = true;
-      break;
     case DictTabInfo::OrderedIndex:
       jam();
       break;

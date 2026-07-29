@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2000, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2000, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -4675,7 +4675,7 @@ bool prepare_create_field(THD *thd, const char *error_schema_name,
 
   if (!(sql_field->flags & NOT_NULL_FLAG)) create_info->null_bits++;
 
-  if (check_column_name(sql_field->field_name)) {
+  if (check_column_name(to_lex_cstring(sql_field->field_name))) {
     my_error(ER_WRONG_COLUMN_NAME, MYF(0), sql_field->field_name);
     return true;
   }
@@ -7467,7 +7467,7 @@ static bool prepare_key(
     return true;
   }
 
-  if (!key_info->name || check_column_name(key_info->name)) {
+  if (!key_info->name || check_column_name(to_lex_cstring(key_info->name))) {
     my_error(ER_WRONG_NAME_FOR_INDEX, MYF(0), key_info->name);
     return true;
   }
@@ -8091,6 +8091,12 @@ static Create_field *add_functional_index_to_create_list(
     return nullptr;
   }
 
+  // Don't even bother trying to create a non-conformant table.
+  if (alter_info->create_list.is_empty()) {
+    my_error(ER_TABLE_MUST_HAVE_A_VISIBLE_COLUMN, MYF(0));
+    return nullptr;
+  }
+
   cr->field_name = field_name;
   cr->field = nullptr;
   cr->hidden = dd::Column::enum_hidden_type::HT_HIDDEN_SQL;
@@ -8563,6 +8569,20 @@ bool mysql_prepare_create_table(
     }
   }
 
+  // Check that we have at least one visible column.
+  bool has_visible_column = false;
+  it.rewind();
+  while ((sql_field = it++)) {
+    if (sql_field->hidden == dd::Column::enum_hidden_type::HT_VISIBLE) {
+      has_visible_column = true;
+      break;
+    }
+  }
+  if (!has_visible_column) {
+    my_error(ER_TABLE_MUST_HAVE_A_VISIBLE_COLUMN, MYF(0));
+    return true;
+  }
+
   /* If fixed row records, we need one bit to check for deleted rows */
   if (!(create_info->table_options & HA_OPTION_PACK_RECORD))
     create_info->null_bits++;
@@ -8948,19 +8968,6 @@ static bool create_table_impl(
   DBUG_TRACE;
   DBUG_PRINT("enter", ("db: '%s'  table: '%s'  tmp: %d", db, table_name,
                        internal_tmp_table));
-
-  // Check that we have at least one visible column.
-  bool has_visible_column = false;
-  for (const Create_field &create_field : alter_info->create_list) {
-    if (create_field.hidden == dd::Column::enum_hidden_type::HT_VISIBLE) {
-      has_visible_column = true;
-      break;
-    }
-  }
-  if (!has_visible_column) {
-    my_error(ER_TABLE_MUST_HAVE_A_VISIBLE_COLUMN, MYF(0));
-    return true;
-  }
 
   if (check_engine(db, table_name, create_info)) return true;
 
@@ -12278,6 +12285,7 @@ static bool fill_alter_inplace_info(THD *thd, TABLE *table,
        about nature of changes than those provided from parser.
   */
   uint old_field_index_without_vgc = 0;
+  uint old_field_index_vgc = 0;
   for (f_ptr = table->field; (field = *f_ptr); f_ptr++) {
     DBUG_PRINT("inplace", ("Existing field: %s", field->field_name));
 
@@ -12287,13 +12295,15 @@ static bool fill_alter_inplace_info(THD *thd, TABLE *table,
     field->clear_flag(FIELD_IS_DROPPED);
 
     /* Use transformed info to evaluate flags for storage engine. */
-    uint new_field_index = 0;
     uint new_field_index_without_vgc = 0;
+    uint new_field_index_vgc = 0;
     new_field_it.init(alter_info->create_list);
     while ((new_field = new_field_it++)) {
       if (new_field->field == field) break;
-      if (new_field->stored_in_db) new_field_index_without_vgc++;
-      new_field_index++;
+      if (new_field->stored_in_db)
+        new_field_index_without_vgc++;
+      else
+        new_field_index_vgc++;
     }
 
     if (new_field) {
@@ -12421,7 +12431,7 @@ static bool fill_alter_inplace_info(THD *thd, TABLE *table,
           ha_alter_info->handler_flags |=
               Alter_inplace_info::ALTER_STORED_COLUMN_ORDER;
       } else {
-        if (field->field_index() != new_field_index)
+        if (old_field_index_vgc != new_field_index_vgc)
           ha_alter_info->handler_flags |=
               Alter_inplace_info::ALTER_VIRTUAL_COLUMN_ORDER;
       }
@@ -12455,7 +12465,10 @@ static bool fill_alter_inplace_info(THD *thd, TABLE *table,
       field->set_flag(FIELD_IS_DROPPED);
       dropped_or_renamed_cols.push_back(field);
     }
-    if (field->stored_in_db) old_field_index_without_vgc++;
+    if (field->stored_in_db)
+      old_field_index_without_vgc++;
+    else
+      old_field_index_vgc++;
   }
 
   if (alter_info->flags & Alter_info::ALTER_ADD_COLUMN) {

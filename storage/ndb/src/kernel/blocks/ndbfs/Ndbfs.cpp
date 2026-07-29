@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -663,7 +663,7 @@ void Ndbfs::execFSOPENREQ(Signal *signal) {
 
   Request *request = theRequestPool->get();
   request->action = Request::open;
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->set(userRef, userPointer, newId());
   request->file = file;
   request->theTrace = signal->getTrace();
@@ -715,7 +715,7 @@ void Ndbfs::execFSREMOVEREQ(Signal *signal) {
   request->action = Request::rmrf;
   request->par.rmrf.directory = req->directory;
   request->par.rmrf.own_directory = req->ownDirectory;
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->set(userRef, req->userPointer, newId());
   request->file = file;
   request->theTrace = signal->getTrace();
@@ -779,7 +779,7 @@ void Ndbfs::execFSCLOSEREQ(Signal *signal) {
   }
   request->set(userRef, fsCloseReq->userPointer, filePointer);
   request->file = openFile;
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->theTrace = signal->getTrace();
   request->m_do_bind = false;
 
@@ -820,7 +820,7 @@ void Ndbfs::readWriteRequest(int action, Signal *signal) {
   FsRef::NdbfsErrorCodeType errorCode;
 
   Request *request = theRequestPool->get();
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->set(userRef, userPointer, filePointer);
   request->file = openFile;
   request->action = (Request::Action)action;
@@ -968,6 +968,7 @@ void Ndbfs::readWriteRequest(int action, Signal *signal) {
   return;
 
 error:
+  // Do not use request, it is only partially filled in
   theRequestPool->put(request);
   FsRef *const fsRef = (FsRef *)&signal->theData[0];
   fsRef->userPointer = userPointer;
@@ -977,14 +978,14 @@ error:
     case Request::write:
     case Request::writeSync: {
       jam();
-      log_file_error(GSN_FSWRITEREF, openFile, request, fsRef);
+      log_file_error(GSN_FSWRITEREF, openFile, nullptr, fsRef);
       sendSignal(userRef, GSN_FSWRITEREF, signal, 3, JBB);
       break;
     }  // case
     case Request::readPartial:
     case Request::read: {
       jam();
-      log_file_error(GSN_FSREADREF, openFile, request, fsRef);
+      log_file_error(GSN_FSREADREF, openFile, nullptr, fsRef);
       sendSignal(userRef, GSN_FSREADREF, signal, 3, JBB);
     }  // case
   }    // switch
@@ -1058,7 +1059,7 @@ void Ndbfs::execFSSYNCREQ(Signal *signal) {
   }
 
   Request *request = theRequestPool->get();
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->action = Request::sync;
   request->set(userRef, userPointer, filePointer);
   request->file = openFile;
@@ -1083,7 +1084,7 @@ void Ndbfs::execFSSUSPENDORD(Signal *signal) {
   }
 
   Request *request = theRequestPool->get();
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->action = Request::suspend;
   request->set(0, 0, filePointer);
   request->file = openFile;
@@ -1106,7 +1107,6 @@ void Ndbfs::execFSAPPENDREQ(Signal *signal) {
 
   FsRef::NdbfsErrorCodeType errorCode;
 
-  Request *request = theRequestPool->get();
   AsyncFile *openFile = theOpenFiles.find(filePointer);
   const NewVARIABLE *myBaseAddrRef =
       getBatVar(blockNumber, instanceNumber, fsReq->varIndex);
@@ -1135,7 +1135,8 @@ void Ndbfs::execFSAPPENDREQ(Signal *signal) {
       goto error;
     }
 
-    NDBFS_SET_REQUEST_ERROR(request, 0);
+    Request *request = theRequestPool->get();
+    NDBFS_CLEAR_REQUEST_ERROR(request);
     request->set(userRef, userPointer, filePointer);
     request->file = openFile;
     request->theTrace = signal->getTrace();
@@ -1154,14 +1155,13 @@ void Ndbfs::execFSAPPENDREQ(Signal *signal) {
 
 error:
   jam();
-  theRequestPool->put(request);
   FsRef *const fsRef = (FsRef *)&signal->theData[0];
   fsRef->userPointer = userPointer;
   fsRef->setErrorCode(fsRef->errorCode, errorCode);
   fsRef->osErrorCode = ~0;  // Indicate local error
 
   jam();
-  log_file_error(GSN_FSAPPENDREF, openFile, request, fsRef);
+  log_file_error(GSN_FSAPPENDREF, openFile, nullptr, fsRef);
   sendSignal(userRef, GSN_FSAPPENDREF, signal, 3, JBB);
   return;
 }
@@ -1177,7 +1177,7 @@ void Ndbfs::execALLOC_MEM_REQ(Signal *signal) {
 
   Request *request = theRequestPool->get();
 
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->set(req->senderRef, req->senderData, 0);
   request->file = file;
   request->theTrace = signal->getTrace();
@@ -1200,7 +1200,7 @@ void Ndbfs::execBUILD_INDX_IMPL_REQ(Signal *signal) {
   ndbrequire(local_ref(req->senderRef));
 
   Request *request = theRequestPool->get();
-  NDBFS_SET_REQUEST_ERROR(request, 0);
+  NDBFS_CLEAR_REQUEST_ERROR(request);
   request->set(req->senderRef, req->senderData, 0);
   request->file = file;
   request->theTrace = signal->getTrace();
@@ -1383,7 +1383,10 @@ void Ndbfs::report(Request *request, Signal *signal) {
         log_file_error(GSN_FSCLOSEREF, nullptr, request, fsRef);
         sendSignal(ref, GSN_FSCLOSEREF, signal, FsRef::SignalLength, JBB);
 
-        g_eventLogger->warning("Error closing file: %s %u/%u",
+        g_eventLogger->warning("%s %s %u/%u",
+                               (request->action == Request::close
+                                    ? "Error closing file:"
+                                    : "Error closing and removing file:"),
                                request->file->theFileName.c_str(),
                                fsRef->errorCode, fsRef->osErrorCode);
         g_eventLogger->warning("Dumping files");
@@ -1906,7 +1909,7 @@ static bool check_for_expected_errors(GlobalSignalNumber gsn, AsyncFile *file,
           strncmp(endp - 3, "ctl", 3) == 0) {
         return true;
       }
-      // D1/DBDIH/S0.sysfile, D1/NDBCNTR/S0.sysfile
+      // D1/NDBCNTR/S0.sysfile
       if (len >= 19 && strncmp(endp - 10, "S0.sysfile", 10) == 0) {
         return true;
       }
@@ -1915,17 +1918,35 @@ static bool check_for_expected_errors(GlobalSignalNumber gsn, AsyncFile *file,
       if (len >= 19 && strncmp(endp - 10, "P0.sysfile", 10) == 0) {
         return true;
       }
-      // D1/DBDIH/S1.FragList
-      if (len >= 20 && strncmp(endp - 8, "FragList", 8) == 0) {
-        return true;
-      }
     }
   }
   return false;
 }
+#endif
 
 void Ndbfs::log_file_error(GlobalSignalNumber gsn, AsyncFile *file,
                            Request *request, FsRef *fsRef) {
+  require((file == nullptr) || (request == nullptr));
+  if (file == nullptr && request != nullptr) file = request->file;
+  const char *signal_name = getSignalName(gsn);
+  ndbd_exit_classification_enum cl [[maybe_unused]];
+  const char *msg = ndbd_exit_message(fsRef->errorCode, &cl);
+
+  // Warn about fileystem errors
+  if (file != nullptr) switch (fsRef->errorCode) {
+      case FsRef::fsErrPermissionDenied:
+      case FsRef::fsErrTemporaryNotAccessible:
+      case FsRef::fsErrNoSpaceLeftOnDevice:
+      case FsRef::fsErrEnvironmentError:
+      case FsRef::fsErrNoMoreResources:
+        warningEvent(
+            "Filesystem problem: %s. Check %s. (error: %u, os error: %u, "
+            "signal %s)",
+            msg, file->theFileName.c_str(), fsRef->errorCode,
+            fsRef->osErrorCode, signal_name);
+    }
+
+#if defined(VM_TRACE) || defined(ERROR_INSERT) || !defined(NDEBUG)
   const char *req_file = nullptr;
   const char *req_func = nullptr;
   int req_line = 0;
@@ -1935,7 +1956,6 @@ void Ndbfs::log_file_error(GlobalSignalNumber gsn, AsyncFile *file,
     req_func = request->error.func;
     req_line = request->error.line;
     req_code = request->error.code;
-    if (file == nullptr) file = request->file;
   }
   const char *file_name = nullptr;
   unsigned file_bp = FsOpenReq::BP_MAX;
@@ -1943,9 +1963,16 @@ void Ndbfs::log_file_error(GlobalSignalNumber gsn, AsyncFile *file,
     file_bp = file->theFileName.get_base_path_spec();
     file_name = file->theFileName.get_base_name();
   }
-  const char *signal_name = getSignalName(gsn);
+
   /*
-   * Suppress common expected errors.
+   * For file operation errors that are not common and not expected under
+   * normal conditions emit some extra information that may help diagnostics
+   * when block code decide to fail due the file operation error.
+   *
+   * For example under normal conditions it is not expected that:
+   * - node fails
+   * - filesystem fails
+   * - user starts backup with same number as an already existing backup
    *
    * TODO:
    * Add information in request about what failures requester expects
@@ -1956,48 +1983,12 @@ void Ndbfs::log_file_error(GlobalSignalNumber gsn, AsyncFile *file,
   if (!expected_error) {
     g_eventLogger->info(
         "(debug) NDBFS: signal %s %d %d: file %u %s: "
-        "request error %s %u %s %d",
+        "request error %s %u %s %d msg %s",
         signal_name, fsRef->errorCode, fsRef->osErrorCode, file_bp, file_name,
-        req_file, req_line, req_func, req_code);
-#if defined(VM_TRACE) || defined(ERROR_INSERT)
-    if (gsn == GSN_FSOPENREF && file != nullptr &&
-        file->theFileName.get_base_path_spec() == FsOpenReq::BP_BACKUP &&
-        fsRef->errorCode == FsRef::fsErrFileExists) {
-      // propagate error to end user
-    } else if (gsn == GSN_FSOPENREF && file_name != nullptr &&
-               (strstr(file_name, "tmp/t1.dat") ||
-                strstr(file_name, "tmp\\t1.dat")) &&
-               fsRef->errorCode == FsRef::fsErrFileExists) {
-      // test ndb.ndb_dd_ddl create undofile, datafile, with already existing
-      // file
-    } else if (gsn == GSN_FSOPENREF && file_name != nullptr &&
-               (strstr(file_name, "tmp/t1.dat") ||
-                strstr(file_name, "tmp\\t1.dat")) &&
-               fsRef->errorCode == FsRef::fsErrFileDoesNotExist) {
-      // test ndb.ndb_dd_ddl create undofile, datafile - fail in windows
-    } else if (gsn == GSN_FSOPENREF && file != nullptr &&
-               strstr(file_name, "FragLog")) {
-      // D11/DBLQH/S2.FragLog
-    } else if (gsn == GSN_FSOPENREF && file != nullptr &&
-               strstr(file_name, ".Data")) {
-      // LCP/0/T10F1.Data does not exist FsRef::fsErrFileDoesNotExist(2815)
-    } else if (gsn == GSN_FSREADREF &&
-               fsRef->errorCode == FsRef::fsErrReadUnderflow &&
-               file != nullptr && strstr(file_name, ".FragList")) {
-      // OM_READWRITE existing: D1/DBDIH/S17.FragList - disk full?
-    } else if (gsn == GSN_FSREADREF && file != nullptr &&
-               strstr(file_name, "S0.sysfile")) {
-      // Invalid/corrupt secretsfile D1/NDBCNTR/S0.sysfile
-    } else {
-      ndbabort();  // Unexpected error?
-    }
-#endif
+        req_file, req_line, req_func, req_code, msg);
   }
-}
-#else
-void Ndbfs::log_file_error(GlobalSignalNumber gsn, AsyncFile *file,
-                           Request *request, FsRef *fsRef) {}
 #endif
+}
 
 BLOCK_FUNCTIONS(Ndbfs)
 

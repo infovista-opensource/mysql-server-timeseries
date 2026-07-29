@@ -1,4 +1,4 @@
-/* Copyright (c) 2023, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2023, 2026, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -53,17 +53,18 @@ static void get_metric_simple_integer(void *measurement_context,
   assert(delivery != nullptr);
   // OTEL only supports int64_t integer counters, clamp wider types
   const T measurement = *(T *)measurement_context;
-  const int64_t value = Clamp<int64_t>(measurement);
+  const auto value = Clamp<int64_t>(measurement);
   delivery->value_int64(delivery_context, value);
 }
 
+#ifdef HAVE_PSI_METRICS_INTERFACE
 static void get_metric_mutex_instances_lost(
     void * /* measurement_context */, measurement_delivery_callback_t delivery,
     void *delivery_context) {
   // see show_func_mutex_instances_lost()
   assert(delivery != nullptr);
   const auto measurement = global_mutex_container.get_lost_counter();
-  const int64_t value = Clamp<int64_t>(measurement);
+  const auto value = Clamp<int64_t>(measurement);
   delivery->value_int64(delivery_context, value);
 }
 
@@ -148,6 +149,12 @@ static PSI_metric_info_v1 ps_metrics[] = {
      MetricOTELType::ASYNC_COUNTER, MetricNumType::METRIC_INTEGER, 0, 0,
      get_metric_simple_integer<decltype(metric_class_lost)>,
      &metric_class_lost},
+    {"logger_lost", "",
+     "How many logger instruments could not be loaded "
+     "(Performance_schema_logger_lost)",
+     MetricOTELType::ASYNC_COUNTER, MetricNumType::METRIC_INTEGER, 0, 0,
+     get_metric_simple_integer<decltype(logger_class_lost)>,
+     &logger_class_lost},
     {"mutex_classes_lost", "",
      "How many mutex instruments could not be loaded "
      "(Performance_schema_mutex_classes_lost)",
@@ -265,11 +272,16 @@ static PSI_metric_info_v1 ps_metrics[] = {
 static PSI_meter_info_v1 ps_meters[] = {
     {"mysql.perf_schema", "MySql performance_schema lost instruments", 10, 0, 0,
      ps_metrics, std::size(ps_metrics)}};
+#endif /* HAVE_PSI_METRICS_INTERFACE */
 
 void register_pfs_metric_sources() {
+#ifdef HAVE_PSI_METRICS_INTERFACE
   mysql_meter_register(ps_meters, std::size(ps_meters));
+#endif /* HAVE_PSI_METRICS_INTERFACE */
 }
 
 void unregister_pfs_metric_sources() {
+#ifdef HAVE_PSI_METRICS_INTERFACE
   mysql_meter_unregister(ps_meters, std::size(ps_meters));
+#endif /* HAVE_PSI_METRICS_INTERFACE */
 }

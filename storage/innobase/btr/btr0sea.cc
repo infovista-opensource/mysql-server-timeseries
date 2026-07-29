@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2024, Oracle and/or its affiliates.
+Copyright (c) 1996, 2026, Oracle and/or its affiliates.
 Copyright (c) 2008, Google Inc.
 
 Portions of this file contain modifications contributed and copyrighted by
@@ -323,7 +323,6 @@ bool btr_search_disable() {
   ut_a(btr_search_enabled);
 
   btr_search_enabled = false;
-  srv_btr_search_enabled = false;
   btr_search_x_unlock_all();
 
   /* Clear AHI info for all non-private blocks from Buffer Pool. */
@@ -356,19 +355,28 @@ bool btr_search_disable() {
   return true;
 }
 
-void btr_search_enable() {
+bool btr_search_enable() {
   os_rmb;
   /* Don't allow enabling AHI if buffer pool resize is happening.
   Ignore it silently. */
-  if (srv_buf_pool_old_size != srv_buf_pool_size) return;
+  if (srv_buf_pool_old_size != srv_buf_pool_size) return false;
 
   /* We need to synchronize with any threads that are in the middle of
   btr_search_disable() - they must first clear all structures before we can
   re-enable AHI again. */
   mutex_enter(&btr_search_enabled_mutex);
+
+  /* srv_btr_search_enabled stores the desired user-visible sysvar state.
+  Re-check it while holding btr_search_enabled_mutex so buffer pool resize
+  completion cannot re-enable AHI after a concurrent SET GLOBAL ... = OFF. */
+  if (!srv_btr_search_enabled) {
+    mutex_exit(&btr_search_enabled_mutex);
+    return false;
+  }
+
   btr_search_enabled = true;
-  srv_btr_search_enabled = true;
   mutex_exit(&btr_search_enabled_mutex);
+  return true;
 }
 
 btr_search_t *btr_search_info_create(mem_heap_t *heap) {
@@ -417,8 +425,7 @@ static void btr_search_info_update_hash(btr_cur_t *cursor) {
     return;
   }
 
-  const uint16_t n_unique =
-      static_cast<uint16_t>(dict_index_get_n_unique_in_tree(index));
+  const uint16_t n_unique = dict_index_get_n_unique_in_tree(index);
   const auto info = index->search_info;
   if (info->n_hash_potential != 0) {
     const auto prefix_info = info->prefix_info.load();

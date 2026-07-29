@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2000, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -2179,21 +2179,6 @@ bool Arg_comparator::compare_null_values() {
   return result;
 }
 
-void Item_bool_func::set_created_by_in2exists() {
-  m_created_by_in2exists = true;
-  // When a condition is created by IN to EXISTS transformation,
-  // it re-uses the expressions that are part of the query. As a
-  // result we need to increment the reference count
-  // for these expressions.
-  WalkItem(this, enum_walk::PREFIX | enum_walk::SUBQUERY, [](Item *inner_item) {
-    // Reference counting matters only for referenced items.
-    if (inner_item->type() == REF_ITEM) {
-      down_cast<Item_ref *>(inner_item)->ref_item()->increment_ref_count();
-    }
-    return false;
-  });
-}
-
 const char *Item_bool_func::bool_transform_names[10] = {"is true",
                                                         "is false",
                                                         "is null",
@@ -2565,6 +2550,22 @@ void Item_in_optimizer::update_used_tables() {
   } else {
     not_null_tables_cache &= subqpred->left_expr->not_null_tables();
   }
+}
+
+bool Item_func_eq::clean_up_after_removal(uchar *arg) {
+  Cleanup_after_removal_context *const ctx =
+      pointer_cast<Cleanup_after_removal_context *>(arg);
+
+  if (ctx->is_stopped(this)) return false;
+
+  if (reference_count() > 1) {
+    (void)decrement_ref_count();
+    ctx->stop_at(this);
+  }
+
+  ctx->m_root->prune_sj_exprs(this, nullptr);
+
+  return false;
 }
 
 longlong Item_func_eq::val_int() {
@@ -5163,6 +5164,21 @@ bool Item_func_in::list_contains_null() {
   return false;
 }
 
+void Item_func_in::set_no_constant_propagation() {
+  // Only when the LHS is a ROW_ITEM that constant propagation
+  // could skip range analysis.
+  if (args[0]->type() != Item::ROW_ITEM) {
+    return;
+  }
+  Item_row *row_predicand = down_cast<Item_row *>(args[0]);
+  for (uint i = 0; i < row_predicand->cols(); ++i) {
+    Item *item = row_predicand->element_index(i)->real_item();
+    if (item->type() == Item::FIELD_ITEM) {
+      item->disable_constant_propagation(nullptr);
+    }
+  }
+}
+
 /**
   Perform context analysis of an IN item tree.
 
@@ -7541,7 +7557,7 @@ Item *Item_equal::equality_substitution_transformer(uchar *arg) {
     // Iterate over the fields selected from the subquery
     uint fieldno = 0;
     for (Item *existing : sj_nest->nested_join->sj_inner_exprs) {
-      if (existing->real_item()->eq(item, false))
+      if (existing->real_item()->eq(item->real_item(), false))
         added_fields.push_back(sj_nest->nested_join->sjm.mat_fields[fieldno]);
       fieldno++;
     }
@@ -7572,7 +7588,7 @@ Item *Item_func_eq::equality_substitution_transformer(uchar *arg) {
   // Iterate over the fields selected from the subquery
   uint fieldno = 0;
   for (Item *existing : sj_nest->nested_join->sj_inner_exprs) {
-    if (existing->real_item()->eq(args[1], false) &&
+    if (existing->real_item()->eq(args[1]->real_item(), false) &&
         (args[0]->used_tables() & ~sj_nest->sj_inner_tables))
       current_thd->change_item_tree(
           args + 1, sj_nest->nested_join->sjm.mat_fields[fieldno]);

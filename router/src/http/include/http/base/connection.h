@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2021, 2024, Oracle and/or its affiliates.
+  Copyright (c) 2021, 2026, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -29,10 +29,13 @@
 #include <algorithm>
 #include <atomic>
 #include <bitset>
+#include <cctype>
 #include <list>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -50,7 +53,7 @@
 #include "http/cno/string.h"
 
 #include "mysql/harness/net_ts/internet.h"
-
+#include "mysql/harness/string_utils.h"
 #include "mysqlrouter/http_common_export.h"
 
 namespace http {
@@ -123,6 +126,7 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
     socket_.set_option(net::ip::tcp::no_delay{true});
     impl::set_socket_parent(&socket_, ss.str().c_str());
     cno_init(&cno_, kind);
+    cno_.disallow_h2_prior_knowledge = 1;
     cno::callback_init(&cno_, this);
     output_buffers_.emplace_back(4096);
     cno_begin(&cno_, version);
@@ -134,18 +138,34 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
   }
 
  public:  // ConnectionInterface implementation
+  void shutdown(bool) override {
+    socket_.shutdown(net::socket_base::shutdown_send);
+  }
+
   bool send(const uint32_t *stream_id_ptr, const int status_code,
             const std::string &method, const std::string &path,
             const Headers &headers, const IOBuffer &data) override {
     cno_message_t message;
     std::vector<cno_header_t> cno_header(headers.size(), cno_header_t());
+    std::vector<std::string> http2_headers_names;
     const bool only_header = 0 == data.length();
+
+    if (CNO_HTTP2 == cno_.mode) {
+      http2_headers_names.reserve(headers.size());
+    }
 
     auto output = cno_header.data();
 
     for (const auto &entry : headers) {
-      output->name.size = entry.first.length();
-      output->name.data = entry.first.c_str();
+      if (CNO_HTTP2 == cno_.mode) {
+        auto &header_name =
+            http2_headers_names.emplace_back(make_lower(entry.first));
+        output->name.size = header_name.length();
+        output->name.data = header_name.c_str();
+      } else {
+        output->name.size = entry.first.length();
+        output->name.data = entry.first.c_str();
+      }
 
       output->value.size = entry.second.length();
       output->value.data = entry.second.c_str();
@@ -197,6 +217,11 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
   void start() override { do_net_recv(); }
 
  protected:
+  std::string make_lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return s;
+  }
+
   void do_net_send() {
     socket_.async_send(ref_buffers(output_buffers_),
                        [this](std::error_code error, auto size) {
@@ -220,6 +245,7 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
   }
 
   void do_net_recv() {
+    reading_pending_ = true;
     socket_.async_receive(
         input_mutable_buffer_, [this](std::error_code error, auto size) {
           switch (on_net_receive(error, size)) {
@@ -228,12 +254,12 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
               break;
 
             case k_pending_writing:
-              break;
-
             case k_pending_none:
+              reading_pending_ = false;
               break;
 
             case k_pending_closing:
+              reading_pending_ = false;
               if (connection_handler_)
                 connection_handler_->on_connection_close(this);
               break;
@@ -248,37 +274,39 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
     }
 
     if (ec) {
-      stop_running();
-      processed_request_ = false;
-      output_pending_ = false;
-
       connection_handler_->on_connection_io_error(this, ec);
-      return k_pending_closing;
+      return stop_running() ? k_pending_writing : k_pending_closing;
     }
 
     const int result = cno_consume(
         &cno_, reinterpret_cast<char *>(input_buffer_), bytes_transferred);
 
     if (result < 0) {
-      processed_request_ = false;
-      output_pending_ = false;
-      stop_running();
-      auto ec = make_error_code(cno_error());
+      const cno_error_t *cno_ec = cno_error();
+      if (!cno_.client) {
+        if (const auto reason =
+                invalid_request_body_headers_rejection_reason(cno_ec)) {
+          connection_handler_->log_invalid_request_body_headers_rejection(
+              *reason);
+          send_bad_request_and_close();
+          return stop_running() ? k_pending_writing : k_pending_closing;
+        }
+      }
+
+      auto ec = make_error_code(cno_ec);
       connection_handler_->on_connection_io_error(this, ec);
-      return k_pending_closing;
+      return stop_running() ? k_pending_writing : k_pending_closing;
     }
 
     if (!keep_alive_) {
       return stop_running() ? k_pending_writing : k_pending_closing;
     }
 
-    if (!running_) return k_pending_closing;
-    if (suspend_) return k_pending_none;
-
-    if (processed_request_) {
-      if (!output_pending_) return k_pending_closing;
-      return k_pending_none;
+    if (!running_) {
+      return output_pending_ ? k_pending_writing : k_pending_closing;
     }
+
+    if (suspend_) return k_pending_none;
 
     return k_pending_reading;
   }
@@ -308,7 +336,6 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
 
       if (0 == output_buffers_.front().size()) {
         has_more = false;
-        processed_request_ = false;
         output_pending_ = false;
 
         if (!running_) {
@@ -319,17 +346,18 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
 
     if (ec) {
       stop_running();
-      processed_request_ = false;
       output_pending_ = false;
 
       connection_handler_->on_connection_io_error(this, ec);
-      return k_pending_closing;
+      return reading_pending_ ? k_pending_reading : k_pending_closing;
     }
     if (has_more) return k_pending_writing;
 
     on_output_buffer_empty();
 
-    if (should_close) return k_pending_closing;
+    if (should_close) {
+      return reading_pending_ ? k_pending_reading : k_pending_closing;
+    }
     if (suspend_) return k_pending_none;
 
     return k_pending_reading;
@@ -354,6 +382,44 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
 
  protected:
   virtual void on_output_buffer_empty() {}
+
+  static std::optional<std::string_view>
+  invalid_request_body_headers_rejection_reason(const cno_error_t *ec) {
+    if (ec->code != CNO_ERRNO_PROTOCOL) return std::nullopt;
+
+    using namespace std::literals;
+    switch (ec->detail) {
+      case CNO_ERROR_DETAIL_INVALID_CONTENT_LENGTH:
+      case CNO_ERROR_DETAIL_MULTIPLE_CONTENT_LENGTHS:
+        return "invalid Content-Length"sv;
+      default:
+        return std::nullopt;
+    }
+  }
+
+  void send_bad_request_and_close() {
+    Headers headers;
+    static const IOBuffer k_empty;
+    headers.add("Connection", "close");
+    headers.add("Content-Length", "0");
+
+    auto stream_id = cno_.last_stream[CNO_REMOTE];
+    prepare_h1_error_response_stream(stream_id);
+    send(&stream_id, status_code::BadRequest,
+         status_code::to_string(status_code::BadRequest), "", headers, k_empty);
+    keep_alive_ = false;
+  }
+
+  void prepare_h1_error_response_stream(uint32_t stream_id) {
+    if (cno_.client || cno_.mode == CNO_HTTP2) return;
+
+    // cno_when_h1_head() normally enables server writes before on_message_head.
+    // Protocol errors during header parsing happen earlier, so mirror that step
+    // before sending the error response through cno_write_head().
+    if (cno_.last_stream[CNO_LOCAL] == 0) {
+      cno_.last_stream[CNO_LOCAL] = stream_id;
+    }
+  }
 
  protected:  // CnoInterface implementation
   int on_cno_writev(const cno_buffer_t *buffer, size_t count) override {
@@ -398,7 +464,7 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
 
   int on_cno_message_tail([[maybe_unused]] const uint32_t session_id,
                           [[maybe_unused]] const cno_tail_t *tail) override {
-    processed_request_ = true;
+    //    processed_request_ = true;
     return 0;
   }
 
@@ -423,8 +489,8 @@ class Connection : public base::ConnectionInterface, public cno::CnoInterface {
   std::mutex output_buffer_mutex_;
   std::list<owned_buffer> output_buffers_;
 
-  std::atomic<bool> processed_request_{false};
   std::atomic<bool> output_pending_{false};
+  std::atomic<bool> reading_pending_{false};
   std::atomic<bool> running_{true};
   std::atomic<bool> suspend_{false};
 

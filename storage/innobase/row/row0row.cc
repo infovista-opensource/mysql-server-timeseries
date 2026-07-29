@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2024, Oracle and/or its affiliates.
+Copyright (c) 1996, 2026, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -245,6 +245,12 @@ dtuple_t *row_build_index_entry_low(const dtuple_t *row, const row_ext_t *ext,
 
     dfield_copy(dfield, dfield2);
 
+    if (!index->is_clustered()) {
+      /* Fields based on virtual columns in secondary indexes are
+      not themselves virtual */
+      dfield->type.prtype &= ~DATA_VIRTUAL;
+    }
+
     if (dfield_is_null(dfield)) {
       continue;
     }
@@ -331,7 +337,8 @@ addition of new virtual columns.
                                 consulted instead
 @param[in]      add_cols        default values of added columns, or NULL
 @param[in]      add_v           new virtual columns added
-                                along with new indexes
+                                along with new indexes. In case add_cols is
+                                not NULL, this is ignored and should be NULL.
 @param[in]      col_map         mapping of old column
                                 numbers to new ones, or NULL
 @param[in]      ext             cache of externally stored column
@@ -346,6 +353,13 @@ static inline dtuple_t *row_build_low(ulint type, const dict_index_t *index,
                                       const dict_add_v_col_t *add_v,
                                       const ulint *col_map, row_ext_t **ext,
                                       mem_heap_t *heap) {
+  /* This function ignores add_v in case add_cols is not null, so specifying
+  both is a bug. Currently, ha_innobase::check_if_supported_inplace_alter()
+  returns HA_ALTER_INPLACE_NOT_SUPPORTED when single ALTER statement tries to
+  add a virtual column and a column with a default value, so this holds. This
+  assert is here to remind us to reimplement row_build_low if we ever start
+  permitting such combination in check_if_supported_inplace_alter(). */
+  ut_ad(!add_v || !add_cols);
   const byte *copy;
   dtuple_t *row;
   ulint n_ext_cols;
@@ -590,11 +604,11 @@ dtuple_t *row_rec_to_index_entry_low(
 
   ut_ad(rec_len == dict_index_get_n_fields(index) ||
         /* non-leaf record which has keys and child page no as record data */
-        rec_len == dict_index_get_n_unique(index) + 1
+        rec_len == dict_index_get_n_unique(index) + 1U
         /* a record for older SYS_INDEXES table
         (missing merge_threshold column) is acceptable. */
         || (index->table->id == DICT_INDEXES_ID &&
-            rec_len == dict_index_get_n_fields(index) - 1));
+            rec_len == dict_index_get_n_fields(index) - 1U));
 
   dict_index_copy_types(entry, index, rec_len);
 
@@ -611,6 +625,7 @@ dtuple_t *row_rec_to_index_entry_low(
   }
 
   ut_ad(dtuple_check_typed(entry));
+  ut_d(entry->validate_for_index(index));
 
   return (entry);
 }

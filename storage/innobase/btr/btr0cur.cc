@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2024, Oracle and/or its affiliates.
+Copyright (c) 1994, 2026, Oracle and/or its affiliates.
 Copyright (c) 2008, Google Inc.
 Copyright (c) 2012, Facebook Inc.
 
@@ -1302,6 +1302,8 @@ retry_page_get:
 
     offsets = rec_get_offsets(node_ptr, index, offsets, ULINT_UNDEFINED,
                               UT_LOCATION_HERE, &heap);
+
+    ut_ad_le(rec_offs_size(offsets), node_ptr_max_size);
 
     /* If the rec is the first or last in the page for
     pessimistic delete intention, it might cause node_ptr insert
@@ -3138,6 +3140,7 @@ void btr_cur_update_in_place_log(ulint flags, const rec_t *rec,
   ut_d(const page_t *page = page_align(rec));
   ut_ad(flags < 256);
   ut_ad(page_is_comp(page) == dict_table_is_comp(index->table));
+  ut_d(update->validate_for_index(index));
 
   const bool opened = mlog_open_and_write_index(
       mtr, rec, index, MLOG_REC_UPDATE_IN_PLACE,
@@ -3221,7 +3224,7 @@ const byte *btr_cur_parse_update_in_place(
 
   heap = mem_heap_create(256, UT_LOCATION_HERE);
 
-  ptr = row_upd_index_parse(ptr, end_ptr, heap, &update);
+  ptr = row_upd_index_parse(ptr, end_ptr, heap, &update, index);
 
   if (!ptr || !page) {
     goto func_exit;
@@ -3528,6 +3531,8 @@ dberr_t btr_cur_optimistic_update(ulint flags, btr_cur_t *cursor,
         thr_get_trx(thr)->id == trx_id);
   ut_ad(fil_page_index_page_check(page));
   ut_ad(btr_page_get_index_id(page) == index->id);
+  ut_ad(update);
+  ut_d(update->validate_for_index(index));
 
   DBUG_EXECUTE_IF("DB_ZIP_OVERFLOW_on_btr_cur_optimistic_update",
                   return (DB_ZIP_OVERFLOW););
@@ -3725,7 +3730,8 @@ func_exit:
     btr_cur_prefetch_siblings(block);
   }
 
-  return (err);
+  ut_d(update->validate_for_index(index));
+  return err;
 }
 
 /** If, in a split, a new supremum record was created as the predecessor of the
@@ -3817,6 +3823,7 @@ dberr_t btr_cur_pessimistic_update(ulint flags, btr_cur_t *cursor,
             (BTR_NO_UNDO_LOG_FLAG | BTR_NO_LOCKING_FLAG | BTR_CREATE_FLAG |
              BTR_KEEP_SYS_FLAG) ||
         thr_get_trx(thr)->id == trx_id);
+  ut_d(update->validate_for_index(index));
 
   err = optim_err = btr_cur_optimistic_update(
       flags | BTR_KEEP_IBUF_BITMAP, cursor, offsets, offsets_heap, update,
@@ -4162,6 +4169,7 @@ return_after_reservations:
 
   *big_rec = big_rec_vec;
 
+  ut_d(update->validate_for_index(index));
   return err;
 }
 

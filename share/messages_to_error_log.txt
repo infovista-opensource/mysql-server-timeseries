@@ -1,4 +1,4 @@
-# Copyright (c) 2017, 2024, Oracle and/or its affiliates.
+# Copyright (c) 2017, 2026, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -3693,7 +3693,7 @@ ER_AUDIT_LOG_EC_WRITER_FAILED_TO_CREATE_FILE
 ER_AUDIT_LOG_RENAME_LOG_FILE_BEFORE_FLUSH
   eng "Audit log file (%s) must be manually renamed before audit_log_flush is set to true."
 
-ER_AUDIT_LOG_FILTER_RESULT_MSG
+OBSOLETE_ER_AUDIT_LOG_FILTER_RESULT_MSG
   eng "%s"
 
 ER_AUDIT_LOG_JSON_READER_FAILED_TO_PARSE
@@ -5781,8 +5781,8 @@ ER_IB_MSG_81
 ER_IB_MSG_82
   eng "%s"
 
-ER_IB_MSG_83
-  eng "%s"
+ER_IB_ERR_PAGE_DIRTY_AT_SHUTDOWN
+  eng "Page still fixed or dirty at shutdown. %s"
 
 ER_IB_MSG_84
   eng "%s"
@@ -10873,7 +10873,7 @@ ER_IB_ERR_RECOVERY_REDO_DISABLED
 ER_IB_WRN_FAST_SHUTDOWN_REDO_DISABLED
   eng "InnoDB cannot do cold shutdown 'innodb_fast_shutdown = 2' and is forcing 'innodb_fast_shutdown = 1' as redo logging is disabled. InnoDB would flush all dirty pages to ensure physical data consistency."
 
-ER_IB_WRN_REDO_DISABLED
+OBSOLETE_ER_IB_WRN_REDO_DISABLED
   eng "InnoDB redo logging is disabled. All data could be lost in case of a server crash."
 
 ER_IB_WRN_REDO_ENABLED
@@ -11672,7 +11672,7 @@ ER_IB_MSG_LOG_FILES_CREATED_BY_CLONE_AND_READ_ONLY_MODE
 ER_IB_MSG_LOG_WRITER_WRITE_FAILED
   eng "Error %d encountered when writing to the redo log file: %s."
 
-ER_IB_MSG_LOG_WRITER_WAIT_ON_NEW_LOG_FILE
+OBSOLETE_ER_IB_MSG_LOG_WRITER_WAIT_ON_NEW_LOG_FILE
   eng "Redo log writer is waiting for a new redo log file. Consider increasing innodb_redo_log_capacity."
 
 ER_IB_MSG_RECOVERY_CHECKPOINT_OUTSIDE_LOG_FILE
@@ -12324,6 +12324,60 @@ OBSOLETE_ER_RPL_KILL_OLD_DUMP_THREAD_ENCOUNTERED
 OBSOLETE_ER_RPL_MTA_ALLOW_COMMIT_OUT_OF_ORDER
   eng "The transaction '%-.192s' will commit out of order with respect to its source to follow the group global order."
 
+ER_CHECK_TABLE_FUNCTIONS
+  eng "Can not open table `%s`.`%s`; functions in constraints, partitions, or virtual columns may have failed."
+
+ER_CHECK_TABLE_FUNCTIONS_DETAIL
+  eng "%s"
+
+ER_GRP_RPL_CERT_BROADCAST_THREAD_CREATE_FAILED
+  eng "Failed to create the Group Replication certifier broadcast thread (THD_certifier_broadcast)."
+
+ER_GRP_RPL_CERT_BROADCAST_THREAD_STARTED
+  eng "The Group Replication certifier broadcast thread (THD_certifier_broadcast) started."
+
+ER_GRP_RPL_CERT_BROADCAST_THREAD_STOPPED
+  eng "The Group Replication certifier broadcast thread (THD_certifier_broadcast) stopped."
+
+ER_GRP_RPL_APPLIER_THD_KILLED_BY_SQL_KILL
+   eng "The group replication applier thread has received KILL request."
+
+ER_IB_MSG_WAITING_ON_LAGGING_REDO_LOG_CONSUMER
+  eng "Threads are unable to reserve space in redo log which can't be reclaimed due to the '%s' consumer still lagging behind at LSN = %llu. Consider increasing innodb_redo_log_capacity."
+
+ER_IB_MSG_ABORTING_LOG_ARCHIVER
+  eng "The redo log archiver is aborted as it was lagging behind at LSN = %llu and unable to advance for more than 2 seconds. Consider increasing the innodb_redo_log_capacity."
+
+ER_IB_INSTANT_ADD_DROP_COLUMN_NOT_ALLOWED
+  eng "Trying to add or drop column(s) in table '%s' for which the current record size is %zu which is more than the maximum allowed size (%zu) for a record. Therefore ADD or DROP column with ALGORITHM = INSTANT is not allowed."
+
+ER_IB_INSTANT_ADD_NOT_POSSIBLE
+  eng "Cannot add %zu field(s) in table '%s' because after adding it, the record size would be %zu which is more than the maximum allowed size (%zu) for a record."
+
+ER_IB_WRN_REDO_DISABLED_INFO
+  eng "InnoDB redo logging is disabled. All data could be lost in case of a server crash. Current lsn is %llu."
+
+ER_IB_MSG_LOG_WRITER_WAIT_ON_NEW_LOG_FILE_INFO
+  eng "Redo log writer is waiting for a new redo log file. Consider increasing innodb_redo_log_capacity. The current log capacity is %llu bytes. The log capacity used is %llu bytes."
+
+ER_AUDIT_LOG_INVALID_FILTER_LOG_ALL
+  eng "The '%s' filter is invalid: %s The operation will continue, and all activities will be logged for this filter. Please fix the filter using the '%s' UDF."
+
+ER_AUDIT_LOG_INVALID_FILTER_LOG_NOTHING
+  eng "The '%s' filter is invalid: %s The operation will continue, but logging for this filter has been disabled. Please fix the filter using the '%s' UDF, or change the '%s' variable to LOG_ALL_IF_INVALID_FILTER_DETECTED."
+
+ER_AUDIT_LOG_INVALID_FILTER_ABORT
+  eng "The '%s' filter is invalid: %s The operation has been aborted. Please fix the filter using the '%s' UDF, or change the '%s' variable as required."
+
+ER_AUDIT_LOG_JSON_INVALID_FILTER_CANNOT_BE_USED
+  eng "The '%s' filter is invalid and cannot be used until corrected. Please apply the '%s' UDF to resolve the issue."
+
+ER_WARN_AUDIT_LOG_FILTER_RECOVERY_LOGGING_DISABLED_LOG
+  eng "The '%s' variable is set to LOG_NOTHING_IF_INVALID_FILTER_DETECTED, meaning audit events will not be logged if the filter is invalid. Consider changing this variable to LOG_ALL_IF_INVALID_FILTER_DETECTED to ensure that all events are logged, even when the filter is invalid."
+
+ER_SERVER_UPGRADE_CHECK_STATUS_MESSAGE
+  eng "%s"
+
 #
 # End of 8.0 error messages intended to be written to the server error log.
 #
@@ -12778,6 +12832,12 @@ ER_RPL_KILL_OLD_DUMP_THREAD_ENCOUNTERED
 ER_RPL_MTA_ALLOW_COMMIT_OUT_OF_ORDER
   eng "The transaction '%-.192s' will commit out of order with respect to its source to follow the group global order."
 
+ER_TEMPTABLE_ENGINE_ERROR
+  eng "Temptable: %s"
+
+ER_AUTH_INITIAL_PLUGIN_OVERRIDE
+  eng "Plugin '%s' from authentication policy cannot be used for initial handshake, using '%s' default instead"
+
 # DO NOT add server-to-client messages here;
 # they go in messages_to_clients.txt
 # in the same directory as this file.
@@ -12791,6 +12851,48 @@ ER_RPL_MTA_ALLOW_COMMIT_OUT_OF_ORDER
 
 #
 # End of 8.1, 8.2, 8.3, 8.4 error messages intended to be written to the server error log.
+#
+
+
+################################################################################
+# Error numbers backported from 9.7 to 8.4
+# Make sure the error numbers are identical between versions
+################################################################################
+
+start-error-number 15604
+ER_INFO_AUTHENTICATION_OCI
+   eng "authentication_oci plugin reported: %s."
+
+start-error-number 15607
+ER_AUDIT_LOG_INVALID_ROTATE_ON_TIME_VALUE
+   eng "Invalid audit_log_rotate_on_time interval specified: %lu. Valid values are 0 (off) or greater than or equal to %d. Adjusting to %d"
+
+start-error-number 15608
+ER_AUDIT_LOG_OFFLOAD_INFO
+  eng "%s"
+
+start-error-number 15609
+ER_AUDIT_LOG_OFFLOAD_WARNING
+  eng "%s"
+
+start-error-number 15610
+ER_AUDIT_LOG_OFFLOAD_ERROR
+  eng "%s"
+
+start-error-number 15694
+ER_WARN_AUDIT_LOG_SYSVAR_ADJUSTED
+  eng "Variable '%s' was adjusted to value '%lld', to make pruning slower than rotation."
+
+start-error-number 15695
+ER_WARN_AUDIT_LOG_SYSVAR_DISCARDED
+  eng "Variable '%s' value change was discarded, to make pruning slower than rotation."
+
+#
+# WARNING
+#
+# If you attempt to add a new error here, think again:
+# this is most likely incorrect.
+# New errors introduced in 8.4-LTS should go into the 8.1-8.4 section.
 #
 
 ################################################################################

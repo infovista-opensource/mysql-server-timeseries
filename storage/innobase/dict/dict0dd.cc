@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2017, 2024, Oracle and/or its affiliates.
+Copyright (c) 2017, 2026, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -435,7 +435,6 @@ int dd_table_open_on_dd_obj(THD *thd, dd::cache::Dictionary_client *client,
 
   TABLE_SHARE ts;
   TABLE table_def;
-  dd::Schema *schema;
 
   error =
       acquire_uncached_table(thd, client, &dd_table, tbl_name, &ts, &table_def);
@@ -443,31 +442,39 @@ int dd_table_open_on_dd_obj(THD *thd, dd::cache::Dictionary_client *client,
     return (error);
   }
 
-  char tmp_name[MAX_FULL_NAME_LEN + 1];
-  const char *tab_namep;
-  if (tbl_name) {
-    tab_namep = tbl_name;
-  } else {
-    char tmp_schema[MAX_DATABASE_NAME_LEN + 1];
-    char tmp_tablename[MAX_TABLE_NAME_LEN + 1];
+  const char *table_name = tbl_name;
+  char tmp_name[FN_REFLEN + 1];
+  if (!tbl_name) {
+    dd::Schema *schema;
     error = client->acquire_uncached<dd::Schema>(dd_table.schema_id(), &schema);
     if (error != 0) {
       return error;
     }
-    tablename_to_filename(schema->name().c_str(), tmp_schema,
-                          MAX_DATABASE_NAME_LEN + 1);
-    tablename_to_filename(dd_table.name().c_str(), tmp_tablename,
-                          MAX_TABLE_NAME_LEN + 1);
-    snprintf(tmp_name, sizeof tmp_name, "%s/%s", tmp_schema, tmp_tablename);
-    tab_namep = tmp_name;
+
+    bool truncated;
+    build_table_filename(tmp_name, sizeof(tmp_name) - 1, schema->name().c_str(),
+                         dd_table.name().c_str(), nullptr, 0, &truncated);
+
+    if (truncated) {
+      ut_d(ut_error);
+      ut_o(return DB_TOO_LONG_PATH);
+    }
+    table_name = tmp_name;
   }
+
+  char norm_name[FN_REFLEN];
+  if (!normalize_table_name(norm_name, table_name)) {
+    ut_d(ut_error);
+    ut_o(return DB_TOO_LONG_PATH);
+  }
+
   if (dd_part == nullptr) {
-    table = dd_open_table(client, &table_def, tab_namep, &dd_table, thd);
+    table = dd_open_table(client, &table_def, norm_name, &dd_table, thd);
     if (table == nullptr) {
       error = HA_ERR_GENERIC;
     }
   } else {
-    table = dd_open_table(client, &table_def, tab_namep, dd_part, thd);
+    table = dd_open_table(client, &table_def, norm_name, dd_part, thd);
   }
   release_uncached_table(&ts, &table_def);
   return error;
@@ -1142,8 +1149,9 @@ static void replace_space_name_in_file_name(dd::Tablespace_file *dd_file,
 @param[in,out]  name    name to convert */
 static void to_lower(std::string &name) { innobase_casedn_str(name.data()); }
 
-dberr_t dd_update_table_and_partitions_after_dir_change(dd::Object_id object_id,
-                                                        std::string path) {
+dberr_t dd_update_table_and_partitions_after_dir_change(
+    dd::Object_id object_id, std::string path,
+    const Dirs_in_datadir &dirs_in_datadir) {
   THD *thd = current_thd;
   dd::cache::Dictionary_client *client = dd::get_dd_client(thd);
   dd::cache::Dictionary_client::Auto_releaser releaser(client);
@@ -1188,10 +1196,11 @@ dberr_t dd_update_table_and_partitions_after_dir_change(dd::Object_id object_id,
     ut_o(return DB_ERROR);
   }
 
-  std::string dd_table_name{dd_table->table().name()};
-  Fil_path fpath{path};
+  const auto pos = path.find_last_of(Fil_path::SEPARATOR);
+  ut_ad(pos != std::string::npos);
+  path.resize(pos);
 
-  bool set_true = !MySQL_datadir_path.is_ancestor(fpath);
+  bool set_true = !dirs_in_datadir.contains(path);
   if (!dd_table_is_partitioned(*dd_table)) {
     /* Set the DATA DIRECTORY FLAG to true for dd table if ibd file is moved to
     directory other than default data dir. Remove the flag if moved from
@@ -2644,7 +2653,7 @@ void dd_write_table(dd::Object_id dd_space_id, Table *dd_table,
       dd_column->se_private_data().set(dd_index_key_strings[DD_TABLE_ID],
                                        table->id);
 
-      /* Write physical post only for tables having row versions */
+      /* Write physical pos only for tables having row versions */
       if (!has_row_versions || dd_column->is_virtual()) {
         continue;
       }

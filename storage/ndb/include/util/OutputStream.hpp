@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -67,16 +67,26 @@ class BufferedOutputStream : public OutputStream {
 
 class FileOutputStream : public OutputStream {
   FILE *f;
+  OutputStream *flush_other;
+  bool flush_on_write;
 
  public:
-  FileOutputStream(FILE *file = stdout);
+  /*
+   * Note, object pointed to by flush_other (if any) must survive the
+   * FileOutputStream object being constructed.
+   */
+  FileOutputStream(FILE *file = stdout, OutputStream *flush_other = nullptr,
+                   bool flush_on_write = false);
   ~FileOutputStream() override {}
   FILE *getFile() { return f; }
 
   int print(const char *fmt, ...) override ATTRIBUTE_FORMAT(printf, 2, 3);
   int println(const char *fmt, ...) override ATTRIBUTE_FORMAT(printf, 2, 3);
   int write(const void *buf, size_t len) override;
-  void flush() override { fflush(f); }
+  void flush() override {
+    if (flush_other) flush_other->flush();
+    fflush(f);
+  }
 };
 
 class SocketOutputStream : public OutputStream {
@@ -147,6 +157,52 @@ class StaticBuffOutputStream : public OutputStream {
     m_buff[0] = '\n';
     m_offset = 0;
   }
+};
+
+/**
+ * Use a byte buffer to circularly buffer strings
+ * 'printed' into the buffer.
+ *
+ * When the head meets the tail, previously buffered
+ * strings are partially overwritten.
+ *
+ * Buffered strings can be iterated in order of
+ * insertion, starting with the oldest.
+ *
+ * The first returned string may be prefix truncated so
+ * that only a suffix remains.
+ *
+ * If a string cannot fit in the buffer at all then
+ * it will be suffix truncated on insertion.
+ */
+class CircularStringBuffer {
+ public:
+  CircularStringBuffer(char *buff, size_t len);
+  ~CircularStringBuffer();
+
+  /* Formatted print into buffer, returns number
+   * of characters added (without truncation),
+   * excluding trailing null
+   */
+  int print(const char *fmt, ...) ATTRIBUTE_FORMAT(printf, 2, 3);
+
+  class Iterator {
+   public:
+    Iterator(const CircularStringBuffer *csb);
+    ~Iterator();
+
+    /* Get next string from buffer, starting with oldest */
+    const char *getNextString(size_t *nextLen = nullptr);
+
+   private:
+    const CircularStringBuffer *m_csb;
+    size_t m_pos;
+  };
+
+ private:
+  char *m_buff;
+  size_t m_len;
+  size_t m_writtenBytes; /* Total bytes */
 };
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2024, Oracle and/or its affiliates.
+/* Copyright (c) 2012, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -1618,6 +1618,7 @@ static int skip_msg(pax_msg *p) {
   prepare(p, skip_op);
   IFDBG(D_NONE, FN; STRLIT("skipping message "); SYCEXP(p->synode));
   p->msg_type = no_op;
+  cfg_app_get_storage_statistics()->add_empty_proposal_round();
   return send_to_all(p, "skip_msg");
 }
 
@@ -2324,8 +2325,11 @@ static int reserve_synode_number(synode_allocation_type *synode_allocation,
       IFDBG(D_CONS, FN; SYCEXP(outer_ep->msgno));
     }
 
-    // Update site to match synode
-    *site = proposer_site = find_site_def_rw(*msgno);
+    // Update node set get the latest state
+    if (is_view(a->body.c_t)) {
+      free_node_set(&a->body.app_u_u.present);
+      a->body.app_u_u.present = detector_node_set(*site);
+    }
 
     // Set the global current message for all number allocators
     set_current_message(incr_synode(*msgno));
@@ -2342,6 +2346,10 @@ static int reserve_synode_number(synode_allocation_type *synode_allocation,
       }
 #endif
     }
+
+    // Update site to match synode
+    *site = proposer_site = find_site_def_rw(*msgno);
+
     // Filter out busy or ignored message numbers
   } while (is_busy(*msgno) || ignore_message(*msgno, *site, "proposer_task"));
   FINALLY
@@ -4652,6 +4660,7 @@ static void propose_noop(synode_no find, pax_machine *p) {
   pax_msg *clone = clone_pax_msg(p->proposer.msg);
   if (clone != nullptr) {
     IFDBG(D_CONS, FN; SYCEXP(find));
+    cfg_app_get_storage_statistics()->add_empty_proposal_round();
     push_msg_3p(site, p, clone, find, no_op);
   } else {
     /* purecov: begin inspected */
@@ -6537,6 +6546,88 @@ static bool_t should_poll_cache(pax_op op) {
   return TRUE;
 }
 
+/**
+ * Check if any data chunk in the application data list has the given cargo
+ * type.
+ *
+ * @param data the application data list
+ * @param cargo the cargo type to look for within the application data body
+ *
+ * @return TRUE if at least one data chunk has the given cargo type, FALSE
+ *         otherwise.
+ */
+static bool_t has_app_data_with_cargo_type(app_data_ptr data,
+                                           cargo_type cargo) {
+  while (data != nullptr) {
+    if (data->body.c_t == cargo) return TRUE;
+    data = data->next;
+  }
+  return FALSE;
+}
+
+/**
+ * Check whether a cargo type is allowed on an external XCom client connection.
+ *
+ * This path must continue to support XCom client/control requests, including
+ * membership configuration requests used by the XCOM communication stack. Cargo
+ * that belongs to application delivery, transaction/view handling, reset, or
+ * termination is rejected before it reaches process_client_msg().
+ *
+ * @param cargo the cargo type to check
+ *
+ * @return TRUE if the cargo type is allowed, FALSE otherwise.
+ */
+static bool_t is_allowed_external_client_cargo_type(cargo_type cargo) {
+  switch (cargo) {
+    case add_node_type:
+    case disable_arbitrator:
+    case enable_arbitrator:
+    case force_config_type:
+    case get_event_horizon_type:
+    case get_leaders_type:
+    case get_synode_app_data_type:
+    case remove_node_type:
+    case set_cache_limit:
+    case set_event_horizon_type:
+    case set_leaders_type:
+    case set_max_leaders:
+    case unified_boot_type:
+      return TRUE;
+    case abort_trans:
+    case app_type:
+    case begin_trans:
+    case convert_into_local_server_type:
+    case exit_type:
+    case prepared_trans:
+    case remove_reset_type:
+    case reset_type:
+    case view_msg:
+    case x_terminate_and_exit:
+    case xcom_boot_type:
+    case xcom_set_group:
+      return FALSE;
+  }
+  return FALSE;
+}
+
+/**
+ * Check if the application data list contains cargo not allowed on an external
+ * XCom client connection.
+ *
+ * @param data the application data list
+ *
+ * @return TRUE if at least one data chunk is not allowed, FALSE otherwise.
+ */
+static bool_t has_disallowed_external_client_cargo_type(app_data_ptr data) {
+  if (has_app_data_with_cargo_type(data, app_type)) return TRUE;
+
+  while (data != nullptr) {
+    if (!is_allowed_external_client_cargo_type(data->body.c_t)) return TRUE;
+    data = data->next;
+  }
+  return FALSE;
+}
+
 int acceptor_learner_task(task_arg arg) {
   DECL_ENV
   connection_descriptor *rfd;
@@ -6648,6 +6739,24 @@ again:
       TERMINATE;
     }
     /* purecov: end */
+
+    /*
+      XCom client messages may carry external XCom client/control requests.
+      The local-server conversion request is handled above and must remain
+      allowed. After that, only cargo types that are part of the external XCom
+      client/control protocol may continue through this task. Application,
+      transaction, view, or otherwise unsupported cargo must not enter through
+      this external connection path.
+    */
+    if (ep->p->op == client_msg &&
+        has_disallowed_external_client_cargo_type(ep->p->a)) {
+      G_WARNING(
+          "Rejecting unsupported data received through an external XCom "
+          "client connection.");
+      delete_pax_msg(ep->p);
+      ep->p = nullptr;
+      TERMINATE;
+    }
 
     /*
       Getting a pointer to the server needs to be done after we have

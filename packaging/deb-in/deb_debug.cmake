@@ -1,4 +1,4 @@
-# Copyright (c) 2017, 2024, Oracle and/or its affiliates.
+# Copyright (c) 2017, 2026, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -54,7 +54,7 @@ SET (DEB_RULES_DEBUG_MAKE
 SET (DEB_RULES_DEBUG_EXTRA
 "
 	# The ini file isn't built for debug, so copy over from the standard build
-	install -g root -o root -m 0755 debian/tmp/usr/lib/mysql/plugin/daemon_example.ini debian/tmp/usr/lib/mysql/plugin/debug
+	install -m 0755 debian/tmp/usr/lib/mysql/plugin/daemon_example.ini debian/tmp/usr/lib/mysql/plugin/debug
 ")
 
 SET (DEB_INSTALL_DEBUG_SERVER
@@ -192,6 +192,8 @@ usr/lib/mysql/plugin/debug/component_test_mysql_system_variable_set.so
 usr/lib/mysql/plugin/debug/component_test_table_access.so
 usr/lib/mysql/plugin/debug/component_test_sensitive_system_variables.so
 usr/lib/mysql/plugin/debug/component_test_status_var_reader.so
+usr/lib/mysql/plugin/debug/component_test_server_telemetry_logs_client.so
+usr/lib/mysql/plugin/debug/component_test_server_telemetry_logs_export.so
 usr/lib/mysql/plugin/debug/component_test_server_telemetry_metrics.so
 usr/lib/mysql/plugin/debug/component_test_server_telemetry_traces.so
 usr/lib/mysql/plugin/debug/component_test_mysql_thd_store_service.so

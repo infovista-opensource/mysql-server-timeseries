@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2004, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2004, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -42,10 +42,10 @@ class BackupConsumer {
   virtual bool endOfTables() { return true; }
   virtual bool endOfTablesFK() { return true; }
   virtual bool tuple(const TupleS &, Uint32 fragId) { return true; }
-  virtual void tuple_free() {}
-  virtual void endOfTuples() {}
+  virtual void data_free() {}
+  virtual bool endOfTuples() { return true; }
   virtual bool logEntry(const LogEntry &) { return true; }
-  virtual void endOfLogEntrys() {}
+  virtual bool endOfLogEntrys() { return true; }
   virtual bool prepare_staging(const TableS &) { return true; }
   virtual bool finalize_staging(const TableS &) { return true; }
   virtual bool finalize_table(const TableS &) { return true; }

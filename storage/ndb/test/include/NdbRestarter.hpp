@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2024, Oracle and/or its affiliates.
+   Copyright (c) 2003, 2026, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,13 +49,11 @@ class NdbRestarter {
   };
 
   int restartOneDbNode(int _nodeId, bool initial = false, bool nostart = false,
-                       bool abort = false, bool force = false,
-                       bool captureError = false);
+                       bool abort = false, bool force = false);
 
-  int restartOneDbNode2(int _nodeId, Uint32 flags, bool captureError = false) {
+  int restartOneDbNode2(int _nodeId, Uint32 flags) {
     return restartOneDbNode(_nodeId, flags & NRRF_INITIAL, flags & NRRF_NOSTART,
-                            flags & NRRF_ABORT, flags & NRRF_FORCE,
-                            captureError);
+                            flags & NRRF_ABORT, flags & NRRF_FORCE);
   }
 
   int restartAll(bool initial = false, bool nostart = false, bool abort = false,
@@ -69,8 +67,7 @@ class NdbRestarter {
   int restartAll3(bool initial = false, bool nostart = false,
                   bool abort = false, bool force = false);
 
-  int restartNodes(int *nodes, int num_nodes, Uint32 flags,
-                   bool captureError = false);
+  int restartNodes(int *nodes, int num_nodes, Uint32 flags);
 
   int startAll();
   int startNodes(const int *_nodes, int _num_nodes);
@@ -125,6 +122,8 @@ class NdbRestarter {
 
   int getNodeStatus(int nodeId);  // return NDB_MGM_NODE_STATUS_*
 
+  int getUndefinedNodeId();
+
   /**
    * return 2 vectors with nodeId's (partitions)
    *   so that each partition can survive
@@ -147,6 +146,8 @@ class NdbRestarter {
   int rollingRestart(Uint32 flags = 0);
 
   int getNodeConnectCount(int nodeId);
+
+  int getNumLdmThreads(int nodeId);
 
  protected:
   int waitClusterState(ndb_mgm_node_status _status, unsigned int _timeout,
